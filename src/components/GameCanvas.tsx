@@ -148,10 +148,10 @@ export function GameCanvas() {
 
     // Responsive scale: fill viewport while keeping 16:9
     const onResize = () => {
-      const sw = wrap.clientWidth / GAME_W;
-      const sh = wrap.clientHeight / GAME_H;
-      const s = Math.min(sw, sh);
-      canvas.style.width = `${GAME_W * s}px`;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const s = Math.min(vw / GAME_W, vh / GAME_H);
+      canvas.style.width  = `${GAME_W * s}px`;
       canvas.style.height = `${GAME_H * s}px`;
     };
     onResize();
@@ -349,6 +349,13 @@ export function GameCanvas() {
       )}
 
       <MobileControls inputManager={inputRef.current} />
+
+      {/* Portrait-mode hint — shown via CSS only on portrait screens */}
+      <div className="portrait-overlay">
+        <div className="portrait-overlay__icon">📱</div>
+        <p>Gire o celular</p>
+        <p>para jogar</p>
+      </div>
     </div>
   );
 }
