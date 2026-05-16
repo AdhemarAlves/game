@@ -498,29 +498,46 @@ export function GameCanvas() {
           return false;
         }
 
+        // Step 1 – prepare queue when monster first enters attack range
         if (m.operation && m.canAttack(pCXupd)) {
-          m.triggerAttack();
           const { a, b } = m.operation;
-          const answer = a * b;
-          const lv = sys.level;
-          const assist: VisualAssistLevel = lv <= 3 ? 'clear' : lv <= 7 ? 'subtle' : 'none';
-          const options = math.buildProjectileOptions(answer, a, b, 4);
-          const mCX = m.position.x + m.size.width / 2;
-          const mCY = m.position.y + m.size.height * 0.45;
+          const options = math.buildProjectileOptions(a * b, a, b, 4);
+          m.prepareQueue(options);
+          m.triggerAttack();
+        }
 
-          options.forEach((val, i) => {
-            const spread = (i / (options.length - 1) - 0.5);
-            const vx = -(200 + Math.random() * 55);
-            const vy = -130 + spread * 200;
-            projectilesRef.current.push(
-              new AnswerProjectile(
-                mCX + (Math.random() - 0.5) * 16,
-                mCY + (Math.random() - 0.5) * 16,
-                vx, vy,
-                val, val === answer, `${a}x${b}`, assist,
-              ),
-            );
-          });
+        // Step 2 – fire one queued shot per interval, max 2 active at a time
+        if (m.operation && m.answerQueue.length > 0 && m.timeUntilNextShot <= 0) {
+          const equationId  = `${m.operation.a}x${m.operation.b}`;
+          const activeCount = projectilesRef.current.filter(
+            (p) => p.active && p.equationId === equationId,
+          ).length;
+
+          if (activeCount < m.maxActiveProjectiles) {
+            const { a, b } = m.operation;
+            const answer   = a * b;
+            const val      = m.dequeueShot();
+            if (val !== null) {
+              const lv     = sys.level;
+              const assist: VisualAssistLevel = lv <= 3 ? 'clear' : lv <= 7 ? 'subtle' : 'none';
+              const mCX    = m.position.x + m.size.width / 2;
+              const mCY    = m.position.y + m.size.height * 0.45;
+              // Aim toward player's reachable zone
+              const dist   = Math.max(80, mCX - pCXupd);
+              const vx     = -(185 + Math.random() * 45);
+              const tTime  = dist / Math.abs(vx);
+              const rawVy  = (GROUND_Y - 55 - mCY - 80 * tTime * tTime) / tTime;
+              const vy     = Math.max(-200, Math.min(-60, rawVy)) + (Math.random() - 0.5) * 28;
+              projectilesRef.current.push(
+                new AnswerProjectile(
+                  mCX + (Math.random() - 0.5) * 10,
+                  mCY,
+                  vx, vy,
+                  val, val === answer, equationId, assist,
+                ),
+              );
+            }
+          }
         }
 
         return true;

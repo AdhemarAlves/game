@@ -32,6 +32,12 @@ export class Monster {
   private recoilTimer = 0;
   private alertTimer = 0;
 
+  // ── Staggered projectile queue ──────────────────────────────────────────────
+  answerQueue: number[] = [];
+  timeUntilNextShot = 0;
+  readonly shotInterval = 1100;       // ms between successive shots
+  readonly maxActiveProjectiles = 2;  // max concurrent projectiles from this monster
+
   protected animTimer = 0;
   protected animFrame = 0;
   protected deathTimer = 0;
@@ -71,6 +77,22 @@ export class Monster {
   /** Reset so monster can attack again (called when projectiles expire/clear). */
   resetAttackWindow(): void {
     this.hasLaunched = false;
+    this.answerQueue = [];
+    this.timeUntilNextShot = 0;
+  }
+
+  /** Load a shuffled answer queue for staggered one-by-one shooting. */
+  prepareQueue(options: number[]): void {
+    this.answerQueue = [...options].sort(() => Math.random() - 0.5);
+    this.timeUntilNextShot = 0; // first shot fires immediately
+  }
+
+  /** Pop the next answer value from the queue and reset the shot timer. */
+  dequeueShot(): number | null {
+    const val = this.answerQueue.shift();
+    if (val === undefined) return null;
+    this.timeUntilNextShot = this.shotInterval;
+    return val;
   }
 
   /** React when the player charges the hammer – monster backs away slightly. */
@@ -105,13 +127,19 @@ export class Monster {
       if (this.alertTimer <= 0 && this.state === 'alert') this.state = 'walking';
     }
 
-    // Attack cooldown
+    // Attack cooldown — only re-arm when queue is also fully drained
     if (this.attackCooldown > 0) {
       this.attackCooldown -= deltaMs;
-      if (this.attackCooldown <= 0) {
-        this.attackCooldown = 0;
-        this.hasLaunched = false; // can attack again
-      }
+      if (this.attackCooldown < 0) this.attackCooldown = 0;
+    }
+    if (this.hasLaunched && this.attackCooldown <= 0 && this.answerQueue.length === 0) {
+      this.hasLaunched = false; // ready for next attack cycle
+    }
+
+    // Shot timer
+    if (this.timeUntilNextShot > 0) {
+      this.timeUntilNextShot -= deltaMs;
+      if (this.timeUntilNextShot < 0) this.timeUntilNextShot = 0;
     }
 
     this.position.x += this.velocity.x * dt;

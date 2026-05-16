@@ -23,8 +23,12 @@ export class ForestScene {
     this.drawSky(ctx, w, h);
     this.drawSun(ctx, w, h);
     this.drawClouds(ctx, w, h, this.offset * 0.08);
-    this.drawMountainLayer(ctx, w, h, this.offset * 0.15, '#3b5f7a', h * 0.53, 180, 85);
-    this.drawMountainLayer(ctx, w, h, this.offset * 0.27, '#2a4d40', h * 0.60, 130, 65);
+
+    // Mountains: 4 layers from distant (snow-capped) to near (dark hills)
+    this.drawMountainLayer(ctx, w, h, this.offset * 0.07, '#5a7fa6', h * 0.49, 220, 100, 'rgba(225,238,255,0.80)');
+    this.drawMountainLayer(ctx, w, h, this.offset * 0.15, '#3b5f7a', h * 0.55, 170, 80,  'rgba(210,228,255,0.55)');
+    this.drawMountainLayer(ctx, w, h, this.offset * 0.27, '#2a4d40', h * 0.61, 140, 62);
+    this.drawMountainLayer(ctx, w, h, this.offset * 0.42, '#1e3a28', h * 0.65, 105, 42);
 
     // Fundo (distante): lentas, pequenas, poucas, alto na tela
     this.drawTreeLayer(ctx, w, h, this.offset * 0.32, '#7aaa55', h * 0.62, 26, 33, 110, 20);
@@ -95,22 +99,83 @@ export class ForestScene {
     w: number, h: number,
     off: number, color: string,
     baseY: number, spacing: number, peakH: number,
+    snowColor?: string,
   ): void {
-    const count = Math.ceil(w / spacing) + 2;
-    const start = -(off % spacing) - spacing;
+    // Normalize offset so negative scroll (player going left) wraps correctly
+    const nOff  = ((off % spacing) + spacing) % spacing;
+    const count = Math.ceil(w / spacing) + 3;
+    const x0    = -nOff - spacing;
+    const id0   = Math.floor(off / spacing);
+
+    // ── Main silhouette ─ smooth S-curves between valleys and peaks ────────────
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.moveTo(start, h);
-    for (let i = 0; i < count; i++) {
-      const x = start + i * spacing;
-      const ph = peakH + (i * 11 % 28);
-      ctx.lineTo(x + spacing * 0.5, baseY - ph);
-      ctx.lineTo(x + spacing, baseY);
+    ctx.moveTo(x0, h);
+    ctx.lineTo(x0, baseY);
+
+    for (let i = 0; i <= count + 1; i++) {
+      const id  = id0 + i;
+      const bx  = x0 + i * spacing;
+      // Deterministic variation per mountain (stable with scroll, no flicker)
+      const phv = peakH * (0.72 + ((id * 37 + 13) % 33) / 100);
+      const px  = bx + spacing * (0.30 + ((id * 23 + 7) % 32) / 100);
+      const py  = baseY - phv;
+
+      ctx.bezierCurveTo(
+        bx + spacing * 0.18, baseY,           // leave valley flat
+        px - spacing * 0.15, py + phv * 0.12, // approach peak
+        px, py,                               // PEAK
+      );
+      ctx.bezierCurveTo(
+        px + spacing * 0.15, py + phv * 0.12, // leave peak
+        bx + spacing * 0.82, baseY,           // descend
+        bx + spacing, baseY,                  // next valley
+      );
     }
-    ctx.lineTo(w, h);
-    ctx.lineTo(start, h);
+
+    ctx.lineTo(x0 + (count + 2) * spacing, h);
     ctx.closePath();
     ctx.fill();
+
+    // ── Depth shadow on the descending (right) side of each peak ───────────
+    ctx.fillStyle = 'rgba(0,0,0,0.10)';
+    for (let i = 0; i <= count + 1; i++) {
+      const id  = id0 + i;
+      const bx  = x0 + i * spacing;
+      const phv = peakH * (0.72 + ((id * 37 + 13) % 33) / 100);
+      const px  = bx + spacing * (0.30 + ((id * 23 + 7) % 32) / 100);
+      const py  = baseY - phv;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.bezierCurveTo(
+        px + spacing * 0.15, py + phv * 0.12,
+        bx + spacing * 0.82, baseY,
+        px + spacing * 0.30, baseY,
+      );
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ── Snow caps on distant mountains ─────────────────────────────────
+    if (snowColor) {
+      ctx.fillStyle = snowColor;
+      for (let i = 0; i <= count + 1; i++) {
+        const id  = id0 + i;
+        const bx  = x0 + i * spacing;
+        const phv = peakH * (0.72 + ((id * 37 + 13) % 33) / 100);
+        const px  = bx + spacing * (0.30 + ((id * 23 + 7) % 32) / 100);
+        const py  = baseY - phv;
+        const sw  = spacing * 0.10;
+        const sh  = phv * 0.27;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.bezierCurveTo(px + sw * 0.6, py + sh * 0.4, px + sw, py + sh, px + sw,  py + sh);
+        ctx.bezierCurveTo(px,            py + sh * 0.7,  px - sw, py + sh, px - sw,  py + sh);
+        ctx.bezierCurveTo(px - sw * 0.6, py + sh * 0.4, px,       py,      px,       py);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
   }
 
   private drawTreeLayer(
