@@ -31,6 +31,24 @@ html, body, #root {
   image-rendering: crisp-edges;
 }
 
+.fullscreen-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 50;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  border: 2px solid rgba(255,255,255,0.08);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.fullscreen-btn:active { transform: translateY(1px); }
+
 /* ─── HUD ────────────────────────────────────────────────────────────────────── */
 .hud {
   position: absolute;
@@ -83,6 +101,30 @@ html, body, #root {
   font-size: 9px;
   color: #ffd700;
   opacity: 0.8;
+}
+
+.hud-combo {
+  display: inline-block;
+  font-size: 14px;
+  color: #ffaa00;
+  text-shadow: 0 0 10px #ff6600, 1px 1px 0 #000;
+  font-weight: bold;
+  margin-left: 10px;
+  animation: pulseCombo 0.4s ease-out;
+}
+
+@keyframes pulseCombo {
+  0% {
+    transform: scale(0.5) rotate(-10deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
 }
 
 /* ─── Question overlay ───────────────────────────────────────────────────────── */

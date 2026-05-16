@@ -1,16 +1,44 @@
 import type { MathQuestion } from '../types';
 
+export interface LearnedOp {
+  a: number;
+  b: number;
+  op: string;
+  result: number;
+}
+
 /**
  * Generates multiplication-table questions with distractors.
  * Difficulty scales with maxFactor (controlled by ScoreSystem.level).
+ * Can also be constrained to a specific pool of operations (during learning phase).
  */
 export class MathSystem {
   private maxFactor = 5;
+  private operationPool: LearnedOp[] = [];
+
+  /** Generate a question locked to a specific operation (used by monsters). */
+  generateQuestionForOperation(a: number, b: number): MathQuestion {
+    const answer = a * b;
+    const options = this.buildOptions(answer, a, b);
+    return { question: `${a} × ${b} = ?`, answer, options, a, b, operation: 'multiply' };
+  }
 
   generateQuestion(): MathQuestion {
-    const a = Math.floor(Math.random() * this.maxFactor) + 1;
-    const b = Math.floor(Math.random() * 10) + 1;
-    const answer = a * b;
+    let a: number, b: number, answer: number;
+
+    if (this.operationPool.length > 0) {
+      // Use a random operation from the learned pool
+      const op = this.operationPool[Math.floor(Math.random() * this.operationPool.length)];
+      a = op.a;
+      b = op.b;
+      answer = op.result;
+    } else {
+      // Standard random generation
+      a = Math.floor(Math.random() * this.maxFactor) + 1;
+      b = Math.floor(Math.random() * 10) + 1;
+      answer = a * b;
+    }
+
     const options = this.buildOptions(answer, a, b);
     return { question: `${a} × ${b} = ?`, answer, options, a, b, operation: 'multiply' };
   }
@@ -46,6 +74,15 @@ export class MathSystem {
   /** Call when the player levels up. */
   setMaxFactor(factor: number): void {
     this.maxFactor = Math.min(Math.max(factor, 2), 10);
+  }
+
+  /** Constrain questions to specific operations (for learning phase) */
+  setOperationPool(ops: LearnedOp[]): void {
+    this.operationPool = ops;
+  }
+
+  clearOperationPool(): void {
+    this.operationPool = [];
   }
 
   getPointsForCorrect(level: number): number {

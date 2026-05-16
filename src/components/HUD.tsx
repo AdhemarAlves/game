@@ -3,9 +3,10 @@ interface HUDProps {
   score: number;
   level: number;
   highScore: number;
+  combo?: number;
 }
 
-export function HUD({ lives, score, level, highScore }: HUDProps) {
+export function HUD({ lives, score, level, highScore, combo = 0 }: HUDProps) {
   return (
     <div className="hud">
       <div className="hud-lives">
@@ -18,6 +19,7 @@ export function HUD({ lives, score, level, highScore }: HUDProps) {
 
       <div className="hud-center">
         <span className="hud-level">Nível {level}</span>
+        {combo > 1 && <span className="hud-combo">COMBO x{combo}</span>}
       </div>
 
       <div className="hud-right">

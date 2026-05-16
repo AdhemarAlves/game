@@ -14,6 +14,7 @@ export class Monster {
   state: MonsterState = 'walking';
   hp = 1;
   readonly id: number;
+  operation?: { a: number; b: number; op: string }; // optional operation to display
 
   private animTimer = 0;
   private animFrame = 0;
@@ -22,9 +23,10 @@ export class Monster {
   /** Arbitrary key-value bag for future extensions (Supabase metadata etc.) */
   metadata: Record<string, unknown> = {};
 
-  constructor(x: number, y: number, id: number) {
+  constructor(x: number, y: number, id: number, operation?: { a: number; b: number; op: string }) {
     this.position = { x, y };
     this.id = id;
+    this.operation = operation;
   }
 
   update(deltaMs: number, groundY: number): void {
@@ -99,6 +101,7 @@ export class Monster {
       ctx.translate(-(x + width / 2), -(y + height / 2));
     }
     this.drawSlime(ctx, x, y, width, height);
+
     ctx.restore();
   }
 

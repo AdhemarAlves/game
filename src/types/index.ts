@@ -12,7 +12,8 @@ export interface Rect {
 }
 
 // ─── Game State ───────────────────────────────────────────────────────────────
-export type GamePhase = 'playing' | 'question' | 'gameover';
+export type GamePhase = 'learning' | 'learning-question' | 'playing' | 'question' | 'boss' | 'gameover';
+export type GameMode = 'normal' | 'mini-boss' | 'boss';
 
 // ─── Math System ──────────────────────────────────────────────────────────────
 export interface MathQuestion {
