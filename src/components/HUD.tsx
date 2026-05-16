@@ -4,9 +4,14 @@ interface HUDProps {
   level: number;
   highScore: number;
   combo?: number;
+  currentTable?: number; // 1-9 = current table, 10 = random mix
 }
 
-export function HUD({ lives, score, level, highScore, combo = 0 }: HUDProps) {
+export function HUD({ lives, score, level, highScore, combo = 0, currentTable = 1 }: HUDProps) {
+  const tableLabel = currentTable === 10
+    ? 'Mix Total'
+    : `Tabuada do ${currentTable}`;
+
   return (
     <div className="hud">
       <div className="hud-lives">
@@ -18,7 +23,7 @@ export function HUD({ lives, score, level, highScore, combo = 0 }: HUDProps) {
       </div>
 
       <div className="hud-center">
-        <span className="hud-level">Nível {level}</span>
+        <span className="hud-table">{tableLabel}</span>
         {combo > 1 && <span className="hud-combo">COMBO x{combo}</span>}
       </div>
 

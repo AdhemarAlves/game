@@ -16,9 +16,9 @@ export class Monster {
   readonly id: number;
   operation?: { a: number; b: number; op: string }; // optional operation to display
 
-  private animTimer = 0;
-  private animFrame = 0;
-  private deathTimer = 0;
+  protected animTimer = 0;
+  protected animFrame = 0;
+  protected deathTimer = 0;
 
   /** Arbitrary key-value bag for future extensions (Supabase metadata etc.) */
   metadata: Record<string, unknown> = {};

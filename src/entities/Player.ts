@@ -19,6 +19,7 @@ export class Player {
   private animFrame = 0;
   private hurtTimer = 0;
   private attackTimer = 0;
+  private animTime = 0; // continuous time for smooth limb animation
 
   readonly MOVE_SPEED = 200;   // px / s
   readonly JUMP_FORCE = -520;  // px / s (negative = up)
@@ -72,6 +73,9 @@ export class Player {
         }
       }
     }
+
+    // Continuous timer for smooth limb animation
+    this.animTime += deltaMs / 1000;
 
     // Frame animation
     this.animTimer += deltaMs;
@@ -148,18 +152,31 @@ export class Player {
     ctx.ellipse(x + w / 2, y + h + 2, w * 0.36, 4, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // ── Legs ──
-    const leg = this.state === 'running' ? Math.sin(t * Math.PI * 0.75) * px * 2.5 : 0;
+    // ── Legs (pivot rotation from hip joint for smooth walk/run) ──
+    const legSwing = this.state === 'running'
+      ? Math.sin(this.animTime * 9) * 0.42
+      : this.state === 'jumping'
+      ? -0.22
+      : Math.sin(this.animTime * 1.8) * 0.04;
+    const hipY = y + h * 0.64;
     // Left leg
+    ctx.save();
+    ctx.translate(x + px * 5.8, hipY);
+    ctx.rotate(legSwing);
     ctx.fillStyle = '#252875';
-    ctx.fillRect(x + px * 4.2, y + h * 0.66, px * 3, px * 4 + leg);
+    ctx.fillRect(-px * 1.5, 0, px * 3.2, px * 4.4);
     ctx.fillStyle = '#2e1008';
-    ctx.fillRect(x + px * 3.7, y + h * 0.66 + px * 4 + leg, px * 3.8, px * 2);
-    // Right leg
+    ctx.fillRect(-px * 1.8, px * 4.4, px * 4, px * 2.2);
+    ctx.restore();
+    // Right leg (opposite phase)
+    ctx.save();
+    ctx.translate(x + px * 10.2, hipY);
+    ctx.rotate(-legSwing);
     ctx.fillStyle = '#252875';
-    ctx.fillRect(x + px * 8.8, y + h * 0.66, px * 3, px * 4 - leg);
+    ctx.fillRect(-px * 1.5, 0, px * 3.2, px * 4.4);
     ctx.fillStyle = '#2e1008';
-    ctx.fillRect(x + px * 8.3, y + h * 0.66 + px * 4 - leg, px * 3.8, px * 2);
+    ctx.fillRect(-px * 1.8, px * 4.4, px * 4, px * 2.2);
+    ctx.restore();
 
     // ── Body ──
     ctx.fillStyle = '#3355cc';
@@ -170,13 +187,18 @@ export class Player {
     ctx.fillStyle = '#d4a020';
     ctx.fillRect(x + px * 7, y + h * 0.38 + px * 4.2, px * 2, px * 1.6);
 
-    // ── Arms ──
-    const arm = this.state === 'running' ? Math.sin(t * Math.PI * 0.75) * px * 1.5 : 0;
+    // ── Arms (pivot rotation from shoulder joint) ──
+    const shoulderY = y + h * 0.40;
+    const armSwing = this.state === 'running'
+      ? Math.sin(this.animTime * 9 + Math.PI) * 0.32
+      : this.state === 'jumping'
+      ? -0.38
+      : Math.sin(this.animTime * 1.8 + 0.5) * 0.05;
     if (this.state === 'attacking') {
       // Right arm swings sword
       const swing = (t / 3) * Math.PI;
       ctx.save();
-      ctx.translate(x + px * 13.5, y + h * 0.44);
+      ctx.translate(x + px * 13.5, shoulderY);
       ctx.rotate(swing - 0.5);
       ctx.fillStyle = '#d8d8d8';
       ctx.fillRect(-px * 0.8, -px * 7, px * 1.8, px * 7);
@@ -184,27 +206,37 @@ export class Player {
       ctx.fillRect(-px * 1.5, -px * 7.2, px * 3.5, px * 1.2);
       ctx.fillStyle = '#7a3c10';
       ctx.fillRect(-px * 0.8, 0, px * 1.8, px * 2.5);
+      ctx.fillStyle = '#3355cc';
+      ctx.fillRect(-px * 1.4, 0, px * 2.8, px * 4.2);
+      ctx.fillStyle = '#f4c090';
+      ctx.fillRect(-px * 1.4, px * 4.2, px * 2.8, px * 2.8);
       ctx.restore();
-      ctx.fillStyle = '#3355cc';
-      ctx.fillRect(x + px * 11.5, y + h * 0.38, px * 2.8, px * 4.2);
-      ctx.fillStyle = '#f4c090';
-      ctx.fillRect(x + px * 11.5, y + h * 0.38 + px * 4, px * 2.8, px * 2.8);
     } else {
-      // Sword at rest on right side
+      // Right arm with sword — swings opposite to left leg
+      ctx.save();
+      ctx.translate(x + px * 12.8, shoulderY);
+      ctx.rotate(-armSwing);
       ctx.fillStyle = '#d8d8d8';
-      ctx.fillRect(x + px * 13.2, y + h * 0.32, px * 1.4, px * 6.5);
+      ctx.fillRect(-px * 0.7, -px * 5.5, px * 1.5, px * 5.5);
       ctx.fillStyle = '#d4a020';
-      ctx.fillRect(x + px * 12, y + h * 0.32 + px * 1.2, px * 4, px * 1);
+      ctx.fillRect(-px * 2, -px * 5.6, px * 4, px * 1);
+      ctx.fillStyle = '#7a3c10';
+      ctx.fillRect(-px * 0.7, -px * 1, px * 1.5, px * 1.5);
       ctx.fillStyle = '#3355cc';
-      ctx.fillRect(x + px * 11.5, y + h * 0.38 + arm, px * 2.8, px * 4.2);
+      ctx.fillRect(-px * 1.4, 0, px * 2.8, px * 4.2);
       ctx.fillStyle = '#f4c090';
-      ctx.fillRect(x + px * 11.5, y + h * 0.38 + px * 4 + arm, px * 2.8, px * 2.8);
+      ctx.fillRect(-px * 1.4, px * 4.2, px * 2.8, px * 2.8);
+      ctx.restore();
     }
-    // Left arm
+    // Left arm (opposite swing to right)
+    ctx.save();
+    ctx.translate(x + px * 3.2, shoulderY);
+    ctx.rotate(this.state === 'attacking' ? 0.15 : armSwing);
     ctx.fillStyle = '#3355cc';
-    ctx.fillRect(x + px * 1.7, y + h * 0.38 - arm, px * 2.8, px * 4.2);
+    ctx.fillRect(-px * 1.4, 0, px * 2.8, px * 4.2);
     ctx.fillStyle = '#f4c090';
-    ctx.fillRect(x + px * 1.7, y + h * 0.38 + px * 4 - arm, px * 2.8, px * 2.8);
+    ctx.fillRect(-px * 1.4, px * 4.2, px * 2.8, px * 2.8);
+    ctx.restore();
 
     // ── Head ──
     ctx.fillStyle = '#f4c090';

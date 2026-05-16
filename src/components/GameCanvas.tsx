@@ -6,6 +6,9 @@ import { ForestScene } from '../scenes/ForestScene';
 import { Player } from '../entities/Player';
 import { Monster } from '../entities/Monster';
 import { BossMonster } from '../entities/BossMonster';
+import { EagleMonster } from '../entities/EagleMonster';
+import { OgreMonster } from '../entities/OgreMonster';
+import { SnakeMonster } from '../entities/SnakeMonster';
 import { Gift } from '../entities/Gift';
 import { LearningArtifact } from '../entities/LearningArtifact';
 import { MathSystem } from '../systems/MathSystem';
@@ -15,6 +18,7 @@ import { ComboSystem } from '../systems/ComboSystem';
 import { DifficultyManager } from '../systems/DifficultyManager';
 import { CoinSystem } from '../systems/CoinSystem';
 import { MathMemory } from '../systems/MathMemory';
+import { TableProgressionSystem } from '../systems/TableProgressionSystem';
 import { rectsOverlap, centerDistX } from '../systems/CollisionSystem';
 import { FloatingText } from '../effects/FloatingText';
 import { ParticleSystem } from '../effects/ParticleSystem';
@@ -44,6 +48,8 @@ export function GameCanvas() {
   const [level, setLevel] = useState(1);
   const [highScore, setHighScore] = useState(0);
   const [combo, setCombo] = useState(0);
+  const [currentTable, setCurrentTable] = useState(1);
+  const [answerTimeLeft, setAnswerTimeLeft] = useState(1.0); // 0–1 fraction for timer bar
   const [currentQuestion, setCurrentQuestion] = useState<MathQuestion | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [answerResult, setAnswerResult] = useState<'correct' | 'wrong' | null>(null);
@@ -75,6 +81,10 @@ export function GameCanvas() {
   const gameTimeRef = useRef(0);
   const giftsRef = useRef<Gift[]>([]);
   const learningSystemRef = useRef<LearningSystem | null>(null);
+  const lastSpawnTypeRef = useRef<'artifact' | 'monster'>('monster'); // start so first spawn = artifact
+  const tableProgressionRef = useRef<TableProgressionSystem | null>(null);
+  const answerTimerRef = useRef(0);       // ms elapsed in question phase
+  const answerTimeLimitRef = useRef(14000); // ms limit (decreases with game time)
 
   const syncPhase = useCallback((p: GamePhase) => {
     phaseRef.current = p;
@@ -127,26 +137,28 @@ export function GameCanvas() {
           particles?.burst(GAME_W / 2, 100, 'spark', 15);
         }
 
-        // Hit monster
+        // Hit monster and award points immediately for each correct answer
+        const monsterCX = activeMonsterRef.current
+          ? activeMonsterRef.current.position.x + activeMonsterRef.current.size.width / 2
+          : GAME_W / 2;
+        const monsterY2 = activeMonsterRef.current?.position.y ?? 200;
+
         activeMonsterRef.current?.hit();
 
-        // If monster dies, spawn coins and award points
-        if (activeMonsterRef.current?.isDead?.()) {
-          const monsterX = activeMonsterRef.current.position.x + activeMonsterRef.current.size.width / 2;
-          const monsterY = activeMonsterRef.current.position.y;
-          coinsRef.current?.spawnCoins(monsterX, monsterY, 3);
-          particles?.burst(monsterX, monsterY, 'explosion', 12);
-          
-          const basePts = math.getPointsForCorrect(sys.level) * combo.getMultiplier();
-          const comboPts = basePts + (combo.getCombo() > 1 ? combo.getCombo() * 5 : 0);
-          sys.addScore(comboPts);
-          setScore(sys.score);
-          setLevel(sys.level);
-          math.setMaxFactor(2 + sys.level);
+        const basePts = math.getPointsForCorrect(sys.level) * combo.getMultiplier();
+        const comboPts = basePts + (combo.getCombo() > 1 ? combo.getCombo() * 5 : 0);
+        sys.addScore(comboPts);
+        setScore(sys.score);
+        setLevel(sys.level);
+        math.setMaxFactor(2 + sys.level);
+        floatingTextsRef.current.push(
+          new FloatingText(monsterCX, monsterY2 - 40, `+${comboPts}`, 'score', 1200)
+        );
 
-          floatingTextsRef.current.push(
-            new FloatingText(monsterX, monsterY - 40, `+${comboPts}`, 'score', 1200)
-          );
+        // Extra effects when monster dies (isDying = just reached 0 HP)
+        if (activeMonsterRef.current?.isDying?.()) {
+          coinsRef.current?.spawnCoins(monsterCX, monsterY2, 3);
+          particles?.burst(monsterCX, monsterY2, 'explosion', 14);
         }
 
         activeMonsterRef.current = null;
@@ -173,6 +185,7 @@ export function GameCanvas() {
 
         if (sys.isGameOver()) {
           setHighScore(sys.getHighScore());
+          tableProgressionRef.current?.saveCheckpoint();
           questionRef.current = null;
           answerLockedRef.current = false;
           setCurrentQuestion(null);
@@ -187,9 +200,11 @@ export function GameCanvas() {
       setTimeout(() => {
         questionRef.current = null;
         answerLockedRef.current = false;
+        answerTimerRef.current = 0;
         setCurrentQuestion(null);
         setSelectedAnswer(null);
         setAnswerResult(null);
+        setAnswerTimeLeft(1);
         syncPhase('playing');
       }, 900);
     },
@@ -227,8 +242,19 @@ export function GameCanvas() {
     giftsRef.current = [];
     floatingTextsRef.current = [];
     particlesRef.current?.clear();
+    // Restore from checkpoint if available (continue from last phase)
+    if (tableProgressionRef.current?.hasCheckpoint()) {
+      tableProgressionRef.current.restoreCheckpoint();
+      const tbl = tableProgressionRef.current.getCurrentTable();
+      setCurrentTable(tbl === 0 ? 10 : tbl);
+    } else {
+      tableProgressionRef.current?.reset();
+      setCurrentTable(1);
+    }
     questionRef.current = null;
     answerLockedRef.current = false;
+    answerTimerRef.current = 0;
+    lastSpawnTypeRef.current = 'monster';
     setCurrentQuestion(null);
     setSelectedAnswer(null);
     setAnswerResult(null);
@@ -268,6 +294,7 @@ export function GameCanvas() {
     const difficultySys = new DifficultyManager();
     const coinSys = new CoinSystem();
     const mathMemory = new MathMemory();
+    const tableProg = new TableProgressionSystem();
     const particles = new ParticleSystem();
     const visualEffects = new VisualEffects();
 
@@ -280,22 +307,14 @@ export function GameCanvas() {
     difficultyRef.current = difficultySys;
     coinsRef.current = coinSys;
     mathMemoryRef.current = mathMemory;
+    tableProgressionRef.current = tableProg;
     particlesRef.current = particles;
     visualEffectsRef.current = visualEffects;
     learningSystemRef.current = learning;
     monstersRef.current = [];
     setHighScore(sys.getHighScore());
 
-    // ── Initialize learning phase: spawn 5 gift tutorial boxes scrolling ──
-    const learnedOps = learning.generateLearningOps();
-    const giftSpacing = 180;
-    giftsRef.current = learnedOps.map((op, i) => {
-      const g = new Gift(GAME_W + 40 + i * giftSpacing, GROUND_Y - 50, i, op);
-      g.velocity = { x: -72, y: 0 }; // Scrolls left like monsters
-      return g;
-    });
-    math.setOperationPool(learnedOps);
-    syncPhase('learning');
+    syncPhase('playing');
 
     // ── Game loop ──
     const loop = new GameLoop();
@@ -383,12 +402,26 @@ export function GameCanvas() {
                   : math.generateQuestion();
                 questionRef.current = q;
                 setCurrentQuestion(q);
+                // Answer time limit: starts 14 s, ramps to 5 s over ~3 min
+                answerTimeLimitRef.current = Math.max(5000, 14000 - gameTimeRef.current * 50);
+                answerTimerRef.current = 0;
+                setAnswerTimeLeft(1);
                 syncPhase('question');
               } else {
                 player.attack();
               }
             }
           }
+        }
+      }
+
+      // ══ ANSWER TIMER (question phase) ══════════════════════════════════════
+      if (ph === 'question' && !answerLockedRef.current) {
+        answerTimerRef.current += delta;
+        const fraction = Math.max(0, 1 - answerTimerRef.current / answerTimeLimitRef.current);
+        setAnswerTimeLeft(fraction);
+        if (fraction <= 0) {
+          handleAnswer(-1); // Timeout = wrong answer
         }
       }
 
@@ -414,53 +447,96 @@ export function GameCanvas() {
           syncPhase('playing');
         }
       } else if (ph === 'playing') {
-        // Spawn regular monsters
+        gameTimeRef.current += delta / 1000;
+        const t = gameTimeRef.current;
+
+        // ── Spawn ──────────────────────────────────────────────────────────
+        // Interval ramps from 7 s down to 1.8 s over ~4 minutes
         spawnTimerRef.current += delta;
-        const spawnInterval = difficultySys.getSpawnIntervalMs();
+        const spawnInterval = Math.max(1800, 7000 - t * 21);
         if (spawnTimerRef.current >= spawnInterval) {
           spawnTimerRef.current = 0;
 
-          // 90% chance: regular monster, 10% chance: learning artifact
-          if (Math.random() < 0.9) {
-            // Prefer recently learned operations 70% of the time
-            let opA, opB;
-            if (Math.random() < 0.7) {
-              const recentOp = mathMemory.getRandomRecentOp();
-              if (recentOp) {
-                opA = recentOp.a;
-                opB = recentOp.b;
-              } else {
-                opA = 2 + Math.floor(Math.random() * 8);
-                opB = 2 + Math.floor(Math.random() * 8);
-              }
-            } else {
-              opA = 2 + Math.floor(Math.random() * 8);
-              opB = 2 + Math.floor(Math.random() * 8);
-            }
-
-            const m = new Monster(GAME_W + 80, GROUND_Y - 34, monsterIdRef.current++, {
-              a: opA,
-              b: opB,
-              op: '×',
-            });
-            // Apply difficulty speed modifier
-            m.velocity.x = difficultySys.getMonsterSpeed(m.velocity.x);
-            monstersRef.current.push(m);
-          } else {
-            // Spawn learning artifact
-            const a = 2 + Math.floor(Math.random() * 8);
-            const b = 2 + Math.floor(Math.random() * 8);
-            const artifact = new LearningArtifact(GAME_W + 50, GROUND_Y - 60, a, b, monsterIdRef.current++);
+          if (tableProg.isArtifactSubPhase()) {
+            // ── Artifact sub-phase: next op in table sequence ──
+            const op = tableProg.nextArtifactOp();
+            const artifact = new LearningArtifact(GAME_W + 50, GROUND_Y - 60, op.a, op.b, monsterIdRef.current++);
             artifactsRef.current.push(artifact);
+            // Sync table (phase may have just switched to monster sub-phase)
+            const tblAfter = tableProg.getCurrentTable();
+            setCurrentTable(tblAfter === 0 ? 10 : tblAfter);
+          } else {
+            // ── Monster sub-phase: random op from current table ──
+            const rnd = Math.random();
+            if (t > 90 && rnd < 0.15) {
+              const op = tableProg.randomMonsterOp();
+              const ogre = new OgreMonster(GAME_W + 80, GROUND_Y - 60, monsterIdRef.current++, { a: op.a, b: op.b, op: '×' });
+              ogre.velocity.x = difficultySys.getMonsterSpeed(-44);
+              monstersRef.current.push(ogre);
+            } else if (t > 60 && rnd < 0.30) {
+              const op = tableProg.randomMonsterOp();
+              const eagle = new EagleMonster(GAME_W + 80, GROUND_Y - 145, monsterIdRef.current++, { a: op.a, b: op.b, op: '×' });
+              eagle.velocity.x = difficultySys.getMonsterSpeed(-100);
+              monstersRef.current.push(eagle);
+            } else if (rnd < 0.60) {
+              const op = tableProg.randomMonsterOp();
+              const snake = new SnakeMonster(GAME_W + 80, GROUND_Y - 24, monsterIdRef.current++, { a: op.a, b: op.b, op: '×' });
+              snake.velocity.x = difficultySys.getMonsterSpeed(snake.velocity.x);
+              monstersRef.current.push(snake);
+            } else {
+              const op = tableProg.randomMonsterOp();
+              const m = new Monster(GAME_W + 80, GROUND_Y - 34, monsterIdRef.current++, { a: op.a, b: op.b, op: '×' });
+              m.velocity.x = difficultySys.getMonsterSpeed(m.velocity.x);
+              monstersRef.current.push(m);
+            }
+            tableProg.onMonsterSpawned();
+            // Sync table (may have advanced to next table after enough monsters)
+            const tbl = tableProg.getCurrentTable();
+            setCurrentTable(tbl === 0 ? 10 : tbl);
           }
         }
-        gameTimeRef.current += delta / 1000;
 
         // Update and cull monsters
         monstersRef.current = monstersRef.current.filter((m) => {
           m.update(delta, GROUND_Y);
-          return m.position.x > -120 && !m.isDead();
+          if (m.isDead()) return false;
+          if (m.position.x <= -120) {
+            // Eagle escaped without being answered → lose a life
+            if (m instanceof EagleMonster) {
+              sys.loseLife();
+              setLives(sys.lives);
+              player.hurt();
+              visualEffects?.shake(5, 200);
+              floatingTextsRef.current.push(
+                new FloatingText(100, GROUND_Y - 100, 'Águia fugiu! -1', 'damage', 1500)
+              );
+              if (sys.isGameOver()) {
+                setHighScore(sys.getHighScore());
+                tableProgressionRef.current?.saveCheckpoint();
+                syncPhase('gameover');
+              }
+            }
+            return false;
+          }
+          return true;
         });
+
+        // Separate overlapping monsters (push apart horizontally)
+        const monsters = monstersRef.current;
+        for (let i = 0; i < monsters.length; i++) {
+          for (let j = i + 1; j < monsters.length; j++) {
+            const a = monsters[i];
+            const b = monsters[j];
+            const minDist = a.size.width * 0.5 + b.size.width * 0.5 + 4;
+            const dx = b.position.x - a.position.x;
+            if (Math.abs(dx) < minDist) {
+              const push = (minDist - Math.abs(dx)) / 2;
+              const dir = dx >= 0 ? 1 : -1;
+              a.position.x -= push * dir;
+              b.position.x += push * dir;
+            }
+          }
+        }
 
         // Update and cull artifacts
         artifactsRef.current = artifactsRef.current.filter((a) => a.isAlive());
@@ -498,6 +574,7 @@ export function GameCanvas() {
               visualEffects?.shake(6, 250);
               if (sys.isGameOver()) {
                 setHighScore(sys.getHighScore());
+                tableProgressionRef.current?.saveCheckpoint();
                 syncPhase('gameover');
               }
               break;
@@ -721,7 +798,7 @@ export function GameCanvas() {
     <div ref={wrapRef} className="game-wrap">
       <canvas ref={canvasRef} className="game-canvas" />
 
-      <HUD lives={lives} score={score} level={level} highScore={highScore} combo={combo} />
+      <HUD lives={lives} score={score} level={level} highScore={highScore} combo={combo} currentTable={currentTable} />
 
       {phase === 'question' && currentQuestion && (
         <QuestionPanel
@@ -729,6 +806,7 @@ export function GameCanvas() {
           onAnswer={handleAnswer}
           selectedAnswer={selectedAnswer}
           answerResult={answerResult}
+          timeLeft={answerTimeLeft}
         />
       )}
 
