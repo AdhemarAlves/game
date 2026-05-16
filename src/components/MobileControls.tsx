@@ -1,153 +1,169 @@
-import { useEffect, useRef } from 'react';
-import type { InputManager } from '../engine/InputManager';
+import { useEffect, useRef, useState } from 'react';
+import type { InputManager, InputAction } from '../engine/InputManager';
 
-interface MobileControlsProps {
+interface Props {
   inputManager: InputManager | null;
+  soundMuted?: boolean;
+  onToggleSound?: () => void;
 }
 
-export function MobileControls({ inputManager }: MobileControlsProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+// ─── Virtual Button ───────────────────────────────────────────────────────────
+
+interface BtnProps {
+  label: string;
+  action: InputAction;
+  inputManager: InputManager | null;
+  color: string;
+  size?: number;
+}
+
+function VBtn({ label, action, inputManager, color, size = 72 }: BtnProps) {
+  const pressed = useRef(false);
+
+  const down = (e: React.PointerEvent) => {
+    e.preventDefault();
+    if (pressed.current) return;
+    pressed.current = true;
+    inputManager?.setAction(action, true);
+  };
+
+  const up = (e: React.PointerEvent) => {
+    e.preventDefault();
+    if (!pressed.current) return;
+    pressed.current = false;
+    inputManager?.setAction(action, false);
+  };
+
+  return (
+    <button
+      onPointerDown={down}
+      onPointerUp={up}
+      onPointerLeave={up}
+      onPointerCancel={up}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 14,
+        background: `${color}33`,
+        border: `2px solid ${color}88`,
+        color: '#fff',
+        fontSize: size * 0.35,
+        cursor: 'pointer',
+        touchAction: 'none',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        flexShrink: 0,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export function MobileControls({ inputManager, soundMuted, onToggleSound }: Props) {
+  const [isTouch, setIsTouch] = useState(false);
+  const [portrait, setPortrait] = useState(false);
 
   useEffect(() => {
-    if (!inputManager || !containerRef.current) return;
+    const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    setIsTouch(hasTouch);
 
-    // Register touch zones (x, y, width, height in game-space 960×540)
-    // Left: move left (quarter-width zones on left/right)
-    inputManager.registerTouchZone('ArrowLeft', 0, 400, 120, 140);
-    // Right: move right
-    inputManager.registerTouchZone('ArrowRight', 840, 400, 120, 140);
-    // Jump: up button in center-bottom
-    inputManager.registerTouchZone('ArrowUp', 420, 420, 120, 120);
-    // Attack/Answer: full right half
-    inputManager.registerTouchZone('Space', 480, 350, 480, 190);
-  }, [inputManager]);
+    const check = () => setPortrait(window.innerHeight > window.innerWidth);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  if (!isTouch) return null;
 
   return (
     <div
-      ref={containerRef}
-      className="mobile-controls"
       style={{
         position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        pointerEvents: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        zIndex: 5,
+        inset: 0,
+        pointerEvents: 'none',
+        touchAction: 'none',
+        zIndex: 20,
       }}
     >
-      {/* Invisible touch zones with visual guides (only on touch devices) */}
-      <style>{`
-        @media (hover: none) {
-          .mobile-controls::before {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 35%;
-            background: linear-gradient(
-              to top,
-              rgba(0, 200, 255, 0.15),
-              rgba(0, 200, 255, 0.05),
-              transparent
-            );
-            pointer-events: none;
-          }
+      {/* Portrait warning */}
+      {portrait && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 100,
+            background: 'rgba(0,0,0,0.88)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'column',
+            gap: 12,
+            pointerEvents: 'auto',
+          }}
+        >
+          <span style={{ fontSize: 48 }}>🔄</span>
+          <p style={{ color: '#fff', fontSize: 16, textAlign: 'center', padding: '0 24px' }}>
+            Vire o celular para jogar melhor
+          </p>
+        </div>
+      )}
 
-          .mobile-btn {
-            position: absolute;
-            bottom: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(100, 150, 255, 0.3);
-            border: 2px solid rgba(100, 200, 255, 0.5);
-            border-radius: 8px;
-            color: #fff;
-            font-family: 'Press Start 2P', monospace;
-            font-size: 10px;
-            text-shadow: 0 0 4px rgba(0, 200, 255, 0.8);
-            user-select: none;
-            -webkit-user-select: none;
-            -webkit-touch-callout: none;
-          }
-
-          .mobile-btn:active {
-            background: rgba(100, 200, 255, 0.6);
-            box-shadow: 0 0 8px rgba(0, 200, 255, 0.8), inset 0 0 8px rgba(0, 200, 255, 0.4);
-          }
-
-          .mobile-btn-left {
-            left: 10px;
-            width: 70px;
-            height: 70px;
-          }
-
-          .mobile-btn-right {
-            right: 10px;
-            width: 70px;
-            height: 70px;
-          }
-
-          .mobile-btn-jump {
-            left: 50%;
-            transform: translateX(-50%);
-            width: 80px;
-            height: 70px;
-          }
-
-          .mobile-btn-act {
-            right: 10px;
-            top: 10px;
-            width: 70px;
-            height: 70px;
-            bottom: auto;
-            background: rgba(255, 100, 100, 0.3);
-            border-color: rgba(255, 150, 150, 0.5);
-          }
-
-          .mobile-btn-act:active {
-            background: rgba(255, 150, 150, 0.6);
-            box-shadow: 0 0 8px rgba(255, 100, 100, 0.8), inset 0 0 8px rgba(255, 100, 100, 0.4);
-          }
-        }
-      `}</style>
-
-      {/* Desktop: show nothing. Mobile (hover: none): show buttons */}
+      {/* Left / Right movement – bottom-left */}
       <div
-        className="mobile-btn mobile-btn-left"
-        style={{ display: 'var(--show-mobile, none)' }}
+        style={{
+          position: 'absolute',
+          bottom: 18,
+          left: 14,
+          display: 'flex',
+          gap: 10,
+          pointerEvents: 'auto',
+        }}
       >
-        ◀
-      </div>
-      <div
-        className="mobile-btn mobile-btn-right"
-        style={{ display: 'var(--show-mobile, none)' }}
-      >
-        ▶
-      </div>
-      <div
-        className="mobile-btn mobile-btn-jump"
-        style={{ display: 'var(--show-mobile, none)' }}
-      >
-        ↑
-      </div>
-      <div
-        className="mobile-btn mobile-btn-act"
-        style={{ display: 'var(--show-mobile, none)' }}
-      >
-        ⚔️
+        <VBtn label="◀" action="left" inputManager={inputManager} color="#4488ff" size={74} />
+        <VBtn label="▶" action="right" inputManager={inputManager} color="#4488ff" size={74} />
       </div>
 
-      <style>{`
-        @media (hover: none) {
-          .mobile-controls > div {
-            --show-mobile: flex !important;
-          }
-        }
-      `}</style>
+      {/* Jump + Attack – bottom-right */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 18,
+          right: 14,
+          display: 'flex',
+          gap: 10,
+          pointerEvents: 'auto',
+        }}
+      >
+        <VBtn label="↑" action="jump" inputManager={inputManager} color="#44cc44" size={74} />
+        <VBtn label="⚔" action="attack" inputManager={inputManager} color="#ff6622" size={86} />
+      </div>
+
+      {/* Sound toggle – top-right */}
+      <button
+        onClick={onToggleSound}
+        style={{
+          position: 'absolute',
+          top: 10,
+          right: 10,
+          background: 'rgba(0,0,0,0.55)',
+          border: '1px solid rgba(255,255,255,0.25)',
+          color: '#fff',
+          borderRadius: 8,
+          padding: '6px 12px',
+          cursor: 'pointer',
+          pointerEvents: 'auto',
+          fontSize: 18,
+        }}
+      >
+        {soundMuted ? '🔇' : '🔊'}
+      </button>
     </div>
   );
 }
+

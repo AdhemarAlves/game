@@ -13,8 +13,7 @@ export class LearningArtifact {
   readonly b: number;
   readonly result: number;
 
-  state: 'active' | 'collected' = 'active';
-  private collectedTimer = 0;
+  state: 'active' | 'smashed' = 'active';
   private bobOffset = 0;
   private bobTime = 0;
 
@@ -29,13 +28,7 @@ export class LearningArtifact {
   }
 
   update(deltaMs: number): void {
-    if (this.state === 'collected') {
-      this.collectedTimer -= deltaMs;
-      if (this.collectedTimer <= 0) {
-        this.state = 'active';
-      }
-      return;
-    }
+    if (this.state === 'smashed') return;
 
     const dt = deltaMs / 1000;
 
@@ -47,13 +40,17 @@ export class LearningArtifact {
     this.bobOffset = Math.sin(this.bobTime * 2) * 8;
   }
 
+  /** Permanently destroys this artifact (e.g. player hammers it). */
+  smash(): void {
+    this.state = 'smashed';
+  }
+
   collect(): void {
-    this.state = 'collected';
-    this.collectedTimer = 400; // Brief animation
+    this.smash();
   }
 
   isAlive(): boolean {
-    return this.position.x > -50; // Off-screen to the left
+    return this.state !== 'smashed' && this.position.x > -50;
   }
 
   getBounds(): Rect {
@@ -66,6 +63,7 @@ export class LearningArtifact {
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
+    if (this.state === 'smashed') return;
     const { x, y } = this.position;
     const { width, height } = this.size;
 

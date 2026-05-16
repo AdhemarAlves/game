@@ -1,6 +1,15 @@
 import type { Vec2 } from '../types';
 
-export type FloatingTextType = 'damage' | 'heal' | 'score' | 'combo' | 'result' | 'message';
+export type FloatingTextType =
+  | 'damage'
+  | 'heal'
+  | 'score'
+  | 'combo'
+  | 'result'
+  | 'message'
+  | 'correct'
+  | 'wrong'
+  | 'hammer';
 
 /**
  * Generic floating text system.
@@ -23,7 +32,7 @@ export class FloatingText {
     y: number,
     text: string,
     type: FloatingTextType = 'score',
-    durationMs: number = 1500
+    durationMs: number = 1500,
   ) {
     this.position = { x, y };
     this.text = text;
@@ -31,9 +40,9 @@ export class FloatingText {
     this.duration = durationMs;
     this.size = { width: 100, height: 40 };
 
-    // Style based on type
     switch (type) {
       case 'damage':
+      case 'wrong':
         this.fontSize = 32;
         this.baseColor = '#ff4444';
         this.fontWeight = 'bold';
@@ -54,11 +63,18 @@ export class FloatingText {
         this.fontWeight = 'bold';
         break;
       case 'result':
+      case 'correct':
         this.fontSize = 56;
-        this.baseColor = '#44ff44';
+        this.baseColor = '#44ff88';
+        this.fontWeight = 'bold';
+        break;
+      case 'hammer':
+        this.fontSize = 40;
+        this.baseColor = '#ffcc00';
         this.fontWeight = 'bold';
         break;
       case 'message':
+      default:
         this.fontSize = 20;
         this.baseColor = '#ffffff';
         this.fontWeight = 'normal';
@@ -68,7 +84,7 @@ export class FloatingText {
 
   update(deltaMs: number): void {
     this.elapsed += deltaMs;
-    this.position.y -= (60 * deltaMs) / 1000; // Rise slowly
+    this.position.y -= (60 * deltaMs) / 1000;
   }
 
   isAlive(): boolean {
@@ -77,7 +93,7 @@ export class FloatingText {
 
   draw(ctx: CanvasRenderingContext2D): void {
     const progress = Math.min(this.elapsed / this.duration, 1);
-    const alpha = 1 - progress; // Fade out
+    const alpha = 1 - progress;
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -86,9 +102,10 @@ export class FloatingText {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Add slight glow/shadow for better visibility
-    if (this.type === 'combo' || this.type === 'result') {
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+    if (this.type === 'combo' || this.type === 'result' || this.type === 'hammer' || this.type === 'correct') {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = this.baseColor;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.lineWidth = 3;
       ctx.strokeText(this.text, this.position.x, this.position.y);
     }
@@ -97,3 +114,4 @@ export class FloatingText {
     ctx.restore();
   }
 }
+

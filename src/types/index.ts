@@ -12,7 +12,7 @@ export interface Rect {
 }
 
 // ─── Game State ───────────────────────────────────────────────────────────────
-export type GamePhase = 'learning' | 'learning-question' | 'playing' | 'question' | 'boss' | 'gameover';
+export type GamePhase = 'playing' | 'gameover';
 export type GameMode = 'normal' | 'mini-boss' | 'boss';
 
 // ─── Math System ──────────────────────────────────────────────────────────────
@@ -24,6 +24,17 @@ export interface MathQuestion {
   b: number;
   operation: 'multiply' | 'add';
 }
+
+export interface MathEquation {
+  id: string;
+  a: number;
+  b: number;
+  answer: number;
+}
+
+// ─── Hammer System ────────────────────────────────────────────────────────────
+export type HammerState = 'normal' | 'charged' | 'supercharged';
+export type VisualAssistLevel = 'clear' | 'subtle' | 'none';
 
 // ─── Persistence (prepared for Supabase) ──────────────────────────────────────
 export interface SaveData {

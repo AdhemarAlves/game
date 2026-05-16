@@ -13,10 +13,10 @@ export class OgreMonster extends Monster {
     y: number,
     id: number,
     operation?: { a: number; b: number; op: string },
+    hp = 2,
   ) {
-    super(x, y, id, operation);
+    super(x, y, id, operation, hp);
     this.velocity.x = -44;
-    this.hp = 2;
   }
 
   override getBounds(): Rect {

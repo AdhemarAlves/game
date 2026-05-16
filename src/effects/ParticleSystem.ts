@@ -1,6 +1,6 @@
 import type { Vec2 } from '../types';
 
-export type ParticleType = 'coin' | 'spark' | 'smoke' | 'explosion';
+export type ParticleType = 'coin' | 'spark' | 'smoke' | 'explosion' | 'energy' | 'star';
 
 interface Particle {
   position: Vec2;
@@ -26,11 +26,11 @@ export class ParticleSystem {
     y: number,
     type: ParticleType,
     count: number = 10,
-    spread: number = Math.PI * 2
+    spread: number = Math.PI * 2,
   ): void {
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * spread + (Math.random() - 0.5) * 0.3;
-      const speed = 150 + Math.random() * 100;
+      const speed = type === 'energy' ? 80 + Math.random() * 60 : 150 + Math.random() * 100;
 
       const particle: Particle = {
         position: { x: x + Math.random() * 10 - 5, y: y + Math.random() * 10 - 5 },
@@ -40,8 +40,20 @@ export class ParticleSystem {
         },
         type,
         life: 0,
-        maxLife: type === 'coin' ? 800 : type === 'spark' ? 600 : type === 'smoke' ? 2000 : 500,
-        size: type === 'coin' ? 8 : type === 'spark' ? 4 : type === 'smoke' ? 24 : 6,
+        maxLife:
+          type === 'coin'      ? 800  :
+          type === 'spark'     ? 600  :
+          type === 'smoke'     ? 2000 :
+          type === 'energy'    ? 900  :
+          type === 'star'      ? 700  :
+                                 500,
+        size:
+          type === 'coin'   ? 8  :
+          type === 'spark'  ? 4  :
+          type === 'smoke'  ? 24 :
+          type === 'energy' ? 6  :
+          type === 'star'   ? 7  :
+                              6,
         rotation: Math.random() * Math.PI * 2,
         rotationSpeed: (Math.random() - 0.5) * 8,
       };
@@ -147,6 +159,33 @@ export class ParticleSystem {
           ctx.arc(0, 0, p.size, 0, Math.PI * 2);
           ctx.fill();
           break;
+
+        case 'energy':
+          // Hammer energy particle – bright cyan/gold streaks
+          ctx.fillStyle = `rgba(255, 220, 60, ${0.9 * alpha})`;
+          ctx.shadowBlur = 6;
+          ctx.shadowColor = '#ffcc00';
+          ctx.beginPath();
+          ctx.arc(0, 0, p.size * (0.5 + progress * 0.5), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          break;
+
+        case 'star': {
+          // 4-point star shape
+          const sr = p.size * (1 - progress * 0.4);
+          ctx.fillStyle = `rgba(255, 255, 100, ${alpha})`;
+          ctx.beginPath();
+          for (let s = 0; s < 8; s++) {
+            const a2 = (s / 8) * Math.PI * 2;
+            const r2 = s % 2 === 0 ? sr : sr * 0.4;
+            if (s === 0) ctx.moveTo(Math.cos(a2) * r2, Math.sin(a2) * r2);
+            else ctx.lineTo(Math.cos(a2) * r2, Math.sin(a2) * r2);
+          }
+          ctx.closePath();
+          ctx.fill();
+          break;
+        }
       }
 
       ctx.restore();

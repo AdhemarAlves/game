@@ -1,10 +1,15 @@
 import type { Vec2, Rect } from '../types';
 
-export type MonsterState = 'walking' | 'hurt' | 'dying' | 'dead';
+export type MonsterState = 'walking' | 'alert' | 'hurt' | 'recoil' | 'dying' | 'dead';
 
 /**
  * Bouncy slime monster drawn with Canvas 2D (pixel-art style).
  * id is exposed so future Supabase sync can reference the entity.
+ *
+ * New in v2:
+ *  – maxHp / hp support multi-hit monsters and bosses
+ *  – attackCooldown / triggerAttack for projectile-based combat
+ *  – recoilFromHammer() reaction when player charges hammer
  */
 export class Monster {
   position: Vec2;
@@ -12,21 +17,68 @@ export class Monster {
   readonly size = { width: 40, height: 34 };
 
   state: MonsterState = 'walking';
-  hp = 1;
+  hp: number;
+  readonly maxHp: number;
+  readonly isBoss: boolean;
   readonly id: number;
-  operation?: { a: number; b: number; op: string }; // optional operation to display
+  operation?: { a: number; b: number; op: string };
+
+  /** ms until this monster can launch another volley of projectiles */
+  attackCooldown = 0;
+  /** px – distance at which monster launches projectiles */
+  readonly attackRange = 380;
+  /** flag so a monster only launches once per approach */
+  private hasLaunched = false;
+  private recoilTimer = 0;
+  private alertTimer = 0;
 
   protected animTimer = 0;
   protected animFrame = 0;
   protected deathTimer = 0;
 
-  /** Arbitrary key-value bag for future extensions (Supabase metadata etc.) */
+  /** Arbitrary key-value bag for future extensions */
   metadata: Record<string, unknown> = {};
 
-  constructor(x: number, y: number, id: number, operation?: { a: number; b: number; op: string }) {
+  constructor(
+    x: number, y: number, id: number,
+    operation?: { a: number; b: number; op: string },
+    hp = 1,
+    isBoss = false,
+  ) {
     this.position = { x, y };
     this.id = id;
     this.operation = operation;
+    this.maxHp = hp;
+    this.hp = hp;
+    this.isBoss = isBoss;
+  }
+
+  /** True if the monster is ready to fire a new volley. */
+  canAttack(playerX: number): boolean {
+    if (this.attackCooldown > 0) return false;
+    if (this.state === 'dying' || this.state === 'dead') return false;
+    if (this.hasLaunched) return false;
+    const dist = this.position.x - playerX;
+    return dist > 60 && dist < this.attackRange;
+  }
+
+  /** Mark attack as triggered, start cooldown. */
+  triggerAttack(): void {
+    this.hasLaunched = true;
+    this.attackCooldown = 3500 + Math.random() * 1500; // 3.5-5 s cooldown
+  }
+
+  /** Reset so monster can attack again (called when projectiles expire/clear). */
+  resetAttackWindow(): void {
+    this.hasLaunched = false;
+  }
+
+  /** React when the player charges the hammer – monster backs away slightly. */
+  recoilFromHammer(): void {
+    this.recoilTimer = 600;
+    this.state = 'alert';
+    this.alertTimer = 600;
+    this.velocity.x += 90; // back up (positive = right)
   }
 
   update(deltaMs: number, groundY: number): void {
@@ -39,7 +91,35 @@ export class Monster {
     }
 
     const dt = deltaMs / 1000;
+
+    // Recoil
+    if (this.recoilTimer > 0) {
+      this.recoilTimer -= deltaMs;
+    } else if (this.state === 'recoil') {
+      this.state = 'walking';
+    }
+
+    // Alert state
+    if (this.alertTimer > 0) {
+      this.alertTimer -= deltaMs;
+      if (this.alertTimer <= 0 && this.state === 'alert') this.state = 'walking';
+    }
+
+    // Attack cooldown
+    if (this.attackCooldown > 0) {
+      this.attackCooldown -= deltaMs;
+      if (this.attackCooldown <= 0) {
+        this.attackCooldown = 0;
+        this.hasLaunched = false; // can attack again
+      }
+    }
+
     this.position.x += this.velocity.x * dt;
+
+    // Recoil deceleration – snap back to base speed
+    if (this.velocity.x > -40 && this.state !== 'recoil') {
+      this.velocity.x = Math.max(this.velocity.x - 60 * dt, -72);
+    }
 
     // Snap to ground
     const floor = groundY - this.size.height;
@@ -52,7 +132,6 @@ export class Monster {
       this.animFrame = (this.animFrame + 1) % 4;
     }
 
-    // Clear hurt after a beat
     if (this.state === 'hurt' && this.animFrame === 0) {
       this.state = 'walking';
     }
@@ -100,9 +179,38 @@ export class Monster {
       ctx.scale(1 - p * 0.5, 1 - p * 0.5);
       ctx.translate(-(x + width / 2), -(y + height / 2));
     }
-    this.drawSlime(ctx, x, y, width, height);
 
+    // Alert flash
+    if (this.state === 'alert') {
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = '#ff4400';
+    }
+
+    this.drawSlime(ctx, x, y, width, height);
     ctx.restore();
+
+    // HP bar for multi-hit monsters
+    if (this.maxHp > 1 && this.state !== 'dying' && this.state !== 'dead') {
+      const bw = width + 8;
+      const bx = x - 4;
+      const by = y - 10;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(bx, by, bw, 6);
+      const frac = this.hp / this.maxHp;
+      ctx.fillStyle = frac > 0.5 ? '#44cc44' : frac > 0.25 ? '#ffcc00' : '#ff3333';
+      ctx.fillRect(bx, by, Math.round(bw * frac), 6);
+    }
+
+    // Alert exclamation
+    if (this.state === 'alert' && this.alertTimer > 200) {
+      ctx.save();
+      ctx.fillStyle = '#ffee00';
+      ctx.font = 'bold 18px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('!', x + width / 2, y - 14);
+      ctx.restore();
+    }
   }
 
   // ─── Procedural pixel-art slime ─────────────────────────────────────────────

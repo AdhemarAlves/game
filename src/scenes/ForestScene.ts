@@ -1,13 +1,17 @@
 /**
  * Procedurally-drawn parallax forest background.
  * No external assets required — everything is painted with Canvas 2D API.
+ *
+ * v2: scroll is driven externally so the background only moves when
+ * the player is actually walking right (worldScrollSpeed).
  */
 export class ForestScene {
   private offset = 0;
-  /** Pixels per second the world scrolls */
-  private scrollSpeed = 80;
+  private scrollSpeed = 0; // px/s — set each frame by GameCanvas
 
-  update(deltaMs: number): void {
+  /** Called each frame with the current world scroll speed (0 when player is still). */
+  update(deltaMs: number, worldScrollSpeed = 0): void {
+    this.scrollSpeed = worldScrollSpeed;
     this.offset += this.scrollSpeed * (deltaMs / 1000);
   }
 

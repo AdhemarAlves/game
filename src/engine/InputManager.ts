@@ -1,7 +1,17 @@
 /**
  * Tracks keyboard & touch input per frame.
  * Touch areas create virtual key events to unify input handling.
+ * MobileControls can also call setAction() directly for pointer-based buttons.
  */
+export type InputAction = 'left' | 'right' | 'jump' | 'attack';
+
+const ACTION_CODE: Record<InputAction, string> = {
+  left: 'ArrowLeft',
+  right: 'ArrowRight',
+  jump: 'ArrowUp',
+  attack: 'Space',
+};
+
 export class InputManager {
   private readonly keys = new Set<string>();
   private readonly justPressed = new Set<string>();
@@ -19,6 +29,20 @@ export class InputManager {
   /** Register a touch zone that generates virtual key presses */
   registerTouchZone(key: string, x: number, y: number, w: number, h: number): void {
     this.touchZones.push({ key, x, y, w, h });
+  }
+
+  /**
+   * Directly set a logical action from mobile button components.
+   * This bypasses coordinate mapping and works with any screen scale.
+   */
+  setAction(action: InputAction, pressed: boolean): void {
+    const code = ACTION_CODE[action];
+    if (pressed) {
+      if (!this.keys.has(code)) this.justPressed.add(code);
+      this.keys.add(code);
+    } else {
+      this.keys.delete(code);
+    }
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {

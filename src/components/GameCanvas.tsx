@@ -1,32 +1,31 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
+﻿import { useRef, useEffect, useCallback, useState } from 'react';
 
 import { GameLoop } from '../engine/GameLoop';
 import { InputManager } from '../engine/InputManager';
 import { ForestScene } from '../scenes/ForestScene';
 import { Player } from '../entities/Player';
 import { Monster } from '../entities/Monster';
-import { BossMonster } from '../entities/BossMonster';
 import { EagleMonster } from '../entities/EagleMonster';
 import { OgreMonster } from '../entities/OgreMonster';
 import { SnakeMonster } from '../entities/SnakeMonster';
-import { Gift } from '../entities/Gift';
 import { LearningArtifact } from '../entities/LearningArtifact';
+import { AnswerProjectile } from '../entities/AnswerProjectile';
 import { MathSystem } from '../systems/MathSystem';
 import { ScoreSystem } from '../systems/ScoreSystem';
-import { LearningSystem } from '../systems/LearningSystem';
 import { ComboSystem } from '../systems/ComboSystem';
 import { DifficultyManager } from '../systems/DifficultyManager';
 import { CoinSystem } from '../systems/CoinSystem';
 import { MathMemory } from '../systems/MathMemory';
 import { TableProgressionSystem } from '../systems/TableProgressionSystem';
-import { rectsOverlap, centerDistX } from '../systems/CollisionSystem';
+import { HammerPowerSystem } from '../systems/HammerPowerSystem';
+import { SoundManager } from '../systems/SoundManager';
+import { rectsOverlap } from '../systems/CollisionSystem';
 import { FloatingText } from '../effects/FloatingText';
 import { ParticleSystem } from '../effects/ParticleSystem';
 import { VisualEffects } from '../effects/VisualEffects';
-import type { MathQuestion, GamePhase } from '../types';
+import type { GamePhase, HammerState, VisualAssistLevel } from '../types';
 
 import { HUD } from './HUD';
-import { QuestionPanel } from './QuestionPanel';
 import { GameOver } from './GameOver';
 import { MobileControls } from './MobileControls';
 
@@ -34,215 +33,92 @@ import { MobileControls } from './MobileControls';
 const GAME_W = 960;
 const GAME_H = 540;
 const GROUND_Y = GAME_H * 0.74;
-const INTERACT_DIST = 145;
+const WORLD_SCROLL = 90;   // px/s background scrolls when player moves right
+const ATTACK_REACH = 105;  // px – forward reach of player attack hitbox
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const wrapRef   = useRef<HTMLDivElement>(null);
 
   // ── React UI state ──
-  const [phase, setPhase] = useState<GamePhase>('playing');
-  const [lives, setLives] = useState(3);
-  const [score, setScore] = useState(0);
-  const [level, setLevel] = useState(1);
-  const [highScore, setHighScore] = useState(0);
-  const [combo, setCombo] = useState(0);
+  const [phase, setPhase]               = useState<GamePhase>('playing');
+  const [lives, setLives]               = useState(3);
+  const [score, setScore]               = useState(0);
+  const [level, setLevel]               = useState(1);
+  const [highScore, setHighScore]       = useState(0);
+  const [combo, setCombo]               = useState(0);
   const [currentTable, setCurrentTable] = useState(1);
-  const [answerTimeLeft, setAnswerTimeLeft] = useState(1.0); // 0–1 fraction for timer bar
-  const [currentQuestion, setCurrentQuestion] = useState<MathQuestion | null>(null);
-  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
-  const [answerResult, setAnswerResult] = useState<'correct' | 'wrong' | null>(null);
+  const [hammerState, setHammerState]   = useState<HammerState>('normal');
+  const [hammerEnergy, setHammerEnergy] = useState(0);
+  const [currentEquation, setCurrentEquation] = useState<string | undefined>(undefined);
+  const [soundMuted, setSoundMuted]     = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // ── Mutable game refs ──
-  const phaseRef = useRef<GamePhase>('playing');
-  const inputRef = useRef<InputManager | null>(null);
-  const forestRef = useRef<ForestScene | null>(null);
-  const playerRef = useRef<Player | null>(null);
-  const monstersRef = useRef<Monster[]>([]);
-  const bossRef = useRef<BossMonster | null>(null);
-  const artifactsRef = useRef<LearningArtifact[]>([]);
-  const mathRef = useRef<MathSystem | null>(null);
-  const scoreRef = useRef<ScoreSystem | null>(null);
-  const comboRef = useRef<ComboSystem | null>(null);
-  const difficultyRef = useRef<DifficultyManager | null>(null);
-  const coinsRef = useRef<CoinSystem | null>(null);
-  const mathMemoryRef = useRef<MathMemory | null>(null);
-  const floatingTextsRef = useRef<FloatingText[]>([]);
-  const particlesRef = useRef<ParticleSystem | null>(null);
-  const visualEffectsRef = useRef<VisualEffects | null>(null);
-  const activeMonsterRef = useRef<Monster | BossMonster | null>(null);
-  const questionRef = useRef<MathQuestion | null>(null);
-  const answerLockedRef = useRef(false);
-  const spawnTimerRef = useRef(0);
-  const artifactSpawnTimerRef = useRef(0);
-  const monsterIdRef = useRef(0);
-  const gameTimeRef = useRef(0);
-  const giftsRef = useRef<Gift[]>([]);
-  const learningSystemRef = useRef<LearningSystem | null>(null);
-  const lastSpawnTypeRef = useRef<'artifact' | 'monster'>('monster'); // start so first spawn = artifact
-  const tableProgressionRef = useRef<TableProgressionSystem | null>(null);
-  const answerTimerRef = useRef(0);       // ms elapsed in question phase
-  const answerTimeLimitRef = useRef(14000); // ms limit (decreases with game time)
+  // ── Mutable game refs (bypasses React re-render cycle) ──
+  const phaseRef             = useRef<GamePhase>('playing');
+  const inputRef             = useRef<InputManager | null>(null);
+  const forestRef            = useRef<ForestScene | null>(null);
+  const playerRef            = useRef<Player | null>(null);
+  const monstersRef          = useRef<Monster[]>([]);
+  const artifactsRef         = useRef<LearningArtifact[]>([]);
+  const projectilesRef       = useRef<AnswerProjectile[]>([]);
+  const mathRef              = useRef<MathSystem | null>(null);
+  const scoreRef             = useRef<ScoreSystem | null>(null);
+  const comboRef             = useRef<ComboSystem | null>(null);
+  const difficultyRef        = useRef<DifficultyManager | null>(null);
+  const coinsRef             = useRef<CoinSystem | null>(null);
+  const mathMemoryRef        = useRef<MathMemory | null>(null);
+  const tableProgressionRef  = useRef<TableProgressionSystem | null>(null);
+  const hammerRef            = useRef<HammerPowerSystem | null>(null);
+  const soundRef             = useRef<SoundManager | null>(null);
+  const floatingTextsRef     = useRef<FloatingText[]>([]);
+  const particlesRef         = useRef<ParticleSystem | null>(null);
+  const visualEffectsRef     = useRef<VisualEffects | null>(null);
+  const spawnTimerRef        = useRef(0);
+  const monsterIdRef         = useRef(0);
+  const gameTimeRef          = useRef(0);
+  const prevHammerStateRef   = useRef<HammerState>('normal');
 
   const syncPhase = useCallback((p: GamePhase) => {
     phaseRef.current = p;
     setPhase(p);
   }, []);
 
-  // ─── Answer handling ────────────────────────────────────────────────────────
-  const handleAnswer = useCallback(
-    (answer: number) => {
-      if (answerLockedRef.current) return;
-      const q = questionRef.current;
-      const math = mathRef.current;
-      const sys = scoreRef.current;
-      const combo = comboRef.current;
-      const difficulty = difficultyRef.current;
-      const memory = mathMemoryRef.current;
-      const particles = particlesRef.current;
-      const visual = visualEffectsRef.current;
-
-      if (!q || !math || !sys || !combo || !difficulty) return;
-
-      answerLockedRef.current = true;
-      const correct = answer === q.answer;
-      setSelectedAnswer(answer);
-      setAnswerResult(correct ? 'correct' : 'wrong');
-
-      if (correct) {
-        // Correct answer!
-        combo.hit();
-        difficulty.onCorrect();
-        memory?.recordOperation(q.a, q.b, q.answer);
-        setCombo(combo.getCombo());
-
-        // Create floating text for result
-        if (activeMonsterRef.current) {
-          const centerX = activeMonsterRef.current.position.x + activeMonsterRef.current.size.width / 2;
-          const centerY = activeMonsterRef.current.position.y;
-          floatingTextsRef.current.push(
-            new FloatingText(centerX, centerY, `${q.answer}`, 'result', 1500)
-          );
-        }
-
-        // Combo feedback
-        if (combo.getCombo() > 1) {
-          const comboText = `Combo x${combo.getCombo()}`;
-          floatingTextsRef.current.push(
-            new FloatingText(GAME_W / 2, 100, comboText, 'combo', 1000)
-          );
-          visual?.shake(8, 300);
-          particles?.burst(GAME_W / 2, 100, 'spark', 15);
-        }
-
-        // Hit monster and award points immediately for each correct answer
-        const monsterCX = activeMonsterRef.current
-          ? activeMonsterRef.current.position.x + activeMonsterRef.current.size.width / 2
-          : GAME_W / 2;
-        const monsterY2 = activeMonsterRef.current?.position.y ?? 200;
-
-        activeMonsterRef.current?.hit();
-
-        const basePts = math.getPointsForCorrect(sys.level) * combo.getMultiplier();
-        const comboPts = basePts + (combo.getCombo() > 1 ? combo.getCombo() * 5 : 0);
-        sys.addScore(comboPts);
-        setScore(sys.score);
-        setLevel(sys.level);
-        math.setMaxFactor(2 + sys.level);
-        floatingTextsRef.current.push(
-          new FloatingText(monsterCX, monsterY2 - 40, `+${comboPts}`, 'score', 1200)
-        );
-
-        // Extra effects when monster dies (isDying = just reached 0 HP)
-        if (activeMonsterRef.current?.isDying?.()) {
-          coinsRef.current?.spawnCoins(monsterCX, monsterY2, 3);
-          particles?.burst(monsterCX, monsterY2, 'explosion', 14);
-        }
-
-        activeMonsterRef.current = null;
-      } else {
-        // Wrong answer
-        combo.miss();
-        difficulty.onWrong();
-        setCombo(0);
-        sys.loseLife();
-        setLives(sys.lives);
-        playerRef.current?.hurt();
-
-        // Create floating text for wrong answer
-        if (activeMonsterRef.current) {
-          const centerX = activeMonsterRef.current.position.x + activeMonsterRef.current.size.width / 2;
-          const centerY = activeMonsterRef.current.position.y - 20;
-          floatingTextsRef.current.push(
-            new FloatingText(centerX, centerY, `Resposta: ${q.answer}`, 'damage', 1500)
-          );
-        }
-
-        visual?.shake(4, 200);
-        particles?.burst(GAME_W / 2, GAME_H / 2, 'smoke', 8);
-
-        if (sys.isGameOver()) {
-          setHighScore(sys.getHighScore());
-          tableProgressionRef.current?.saveCheckpoint();
-          questionRef.current = null;
-          answerLockedRef.current = false;
-          setCurrentQuestion(null);
-          setSelectedAnswer(null);
-          setAnswerResult(null);
-          syncPhase('gameover');
-          setTimeout(() => {}, 900);
-          return;
-        }
-      }
-
-      setTimeout(() => {
-        questionRef.current = null;
-        answerLockedRef.current = false;
-        answerTimerRef.current = 0;
-        setCurrentQuestion(null);
-        setSelectedAnswer(null);
-        setAnswerResult(null);
-        setAnswerTimeLeft(1);
-        syncPhase('playing');
-      }, 900);
-    },
-    [syncPhase],
-  );
-
   // ─── Restart ────────────────────────────────────────────────────────────────
   const handleRestart = useCallback(() => {
-    const player = playerRef.current;
-    const sys = scoreRef.current;
-    const combo = comboRef.current;
+    const player     = playerRef.current;
+    const sys        = scoreRef.current;
+    const combSys    = comboRef.current;
     const difficulty = difficultyRef.current;
-
-    if (!player || !sys || !combo || !difficulty) return;
+    const hammer     = hammerRef.current;
+    if (!player || !sys || !combSys || !difficulty || !hammer) return;
 
     sys.reset();
-    combo.reset();
+    combSys.reset();
     difficulty.reset();
+    hammer.reset();
+
     setScore(0);
     setLives(3);
     setLevel(1);
     setCombo(0);
+    setHammerState('normal');
+    setHammerEnergy(0);
+    setCurrentEquation(undefined);
 
     player.position = { x: 120, y: GROUND_Y - player.size.height };
     player.velocity = { x: 0, y: 0 };
-    player.state = 'idle';
+    player.state    = 'idle';
 
-    monstersRef.current = [];
-    bossRef.current = null;
-    artifactsRef.current = [];
-    activeMonsterRef.current = null;
-    spawnTimerRef.current = 0;
-    artifactSpawnTimerRef.current = 0;
-    gameTimeRef.current = 0;
-    giftsRef.current = [];
+    monstersRef.current    = [];
+    artifactsRef.current   = [];
+    projectilesRef.current = [];
     floatingTextsRef.current = [];
     particlesRef.current?.clear();
-    // Restore from checkpoint if available (continue from last phase)
+    spawnTimerRef.current = 0;
+    gameTimeRef.current   = 0;
+
     if (tableProgressionRef.current?.hasCheckpoint()) {
       tableProgressionRef.current.restoreCheckpoint();
       const tbl = tableProgressionRef.current.getCurrentTable();
@@ -251,581 +127,652 @@ export function GameCanvas() {
       tableProgressionRef.current?.reset();
       setCurrentTable(1);
     }
-    questionRef.current = null;
-    answerLockedRef.current = false;
-    answerTimerRef.current = 0;
-    lastSpawnTypeRef.current = 'monster';
-    setCurrentQuestion(null);
-    setSelectedAnswer(null);
-    setAnswerResult(null);
+
     syncPhase('playing');
   }, [syncPhase]);
 
-  // ─── Main game loop effect ───────────────────────────────────────────────────
+  // ─── Main game loop ──────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
-    const wrap = wrapRef.current;
+    const wrap   = wrapRef.current;
     if (!canvas || !wrap) return;
 
-    canvas.width = GAME_W;
+    canvas.width  = GAME_W;
     canvas.height = GAME_H;
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
 
-    // Responsive scale: fill viewport while keeping 16:9
     const onResize = () => {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const s = Math.min(vw / GAME_W, vh / GAME_H);
+      const s = Math.min(window.innerWidth / GAME_W, window.innerHeight / GAME_H);
       canvas.style.width  = `${GAME_W * s}px`;
       canvas.style.height = `${GAME_H * s}px`;
     };
     onResize();
     window.addEventListener('resize', onResize);
 
-    // ── Initialize systems ──
-    const input = new InputManager();
-    const forest = new ForestScene();
-    const player = new Player(120, GROUND_Y - 48);
-    const math = new MathSystem();
-    const sys = new ScoreSystem();
-    const learning = new LearningSystem();
-    const comboSys = new ComboSystem();
-    const difficultySys = new DifficultyManager();
-    const coinSys = new CoinSystem();
-    const mathMemory = new MathMemory();
-    const tableProg = new TableProgressionSystem();
-    const particles = new ParticleSystem();
-    const visualEffects = new VisualEffects();
+    // ── Systems ──
+    const input      = new InputManager();
+    const forest     = new ForestScene();
+    const player     = new Player(120, GROUND_Y - 48);
+    const math       = new MathSystem();
+    const sys        = new ScoreSystem();
+    const combSys    = new ComboSystem();
+    const difficulty = new DifficultyManager();
+    const coinSys    = new CoinSystem();
+    const memory     = new MathMemory();
+    const tableProg  = new TableProgressionSystem();
+    const hammer     = new HammerPowerSystem();
+    const sound      = new SoundManager();
+    const particles  = new ParticleSystem();
+    const vfx        = new VisualEffects();
 
-    inputRef.current = input;
-    forestRef.current = forest;
-    playerRef.current = player;
-    mathRef.current = math;
-    scoreRef.current = sys;
-    comboRef.current = comboSys;
-    difficultyRef.current = difficultySys;
-    coinsRef.current = coinSys;
-    mathMemoryRef.current = mathMemory;
+    inputRef.current            = input;
+    forestRef.current           = forest;
+    playerRef.current           = player;
+    mathRef.current             = math;
+    scoreRef.current            = sys;
+    comboRef.current            = combSys;
+    difficultyRef.current       = difficulty;
+    coinsRef.current            = coinSys;
+    mathMemoryRef.current       = memory;
     tableProgressionRef.current = tableProg;
-    particlesRef.current = particles;
-    visualEffectsRef.current = visualEffects;
-    learningSystemRef.current = learning;
-    monstersRef.current = [];
-    setHighScore(sys.getHighScore());
+    hammerRef.current           = hammer;
+    soundRef.current            = sound;
+    particlesRef.current        = particles;
+    visualEffectsRef.current    = vfx;
 
+    setSoundMuted(sound.isMuted());
+    setHighScore(sys.getHighScore());
     syncPhase('playing');
 
-    // ── Game loop ──
     const loop = new GameLoop();
     loop.start((delta) => {
-      const ph = phaseRef.current;
+      if (phaseRef.current === 'gameover') return;
 
-      // ══ INPUT ══════════════════════════════════════════════════════════════
-      if (ph === 'learning' || ph === 'playing') {
-        if (input.isDown('ArrowRight')) {
-          player.velocity.x = player.MOVE_SPEED;
-          player.facingRight = true;
-          if (player.isOnGround && player.state !== 'attacking') player.state = 'running';
-        } else if (input.isDown('ArrowLeft')) {
-          player.velocity.x = -player.MOVE_SPEED;
-          player.facingRight = false;
-          if (player.isOnGround && player.state !== 'attacking') player.state = 'running';
-        } else {
-          player.velocity.x = 0;
-          if (player.isOnGround && player.state === 'running') player.state = 'idle';
-        }
+      // ══════════════════════════════════════════════════════════════════════
+      // INPUT
+      // ══════════════════════════════════════════════════════════════════════
 
-        if (input.wasPressed('ArrowUp')) {
-          player.jump();
-        }
-
-        if (input.wasPressed('Space')) {
-          if (ph === 'learning') {
-            const nearbyGift = giftsRef.current.find(
-              (g) => !g.isOpen() && rectsOverlap(player.getBounds(), g.getBounds()),
-            );
-            if (nearbyGift) {
-              nearbyGift.hit();
-              // Smoke burst + sparks when gift is opened
-              const gx = nearbyGift.position.x + nearbyGift.size.width / 2;
-              const gy = nearbyGift.position.y;
-              particles?.burst(gx, gy, 'smoke', 12);
-              particles?.burst(gx, gy, 'spark', 10);
-              mathMemory.recordOperation(
-                nearbyGift.operation.a,
-                nearbyGift.operation.b,
-                nearbyGift.operation.result,
-              );
-            } else {
-              player.attack();
-            }
-          } else if (ph === 'playing') {
-            // Check for artifacts first
-            const nearbyArtifact = artifactsRef.current.find(
-              (a) => a.state === 'active' && rectsOverlap(player.getBounds(), a.getBounds()),
-            );
-            if (nearbyArtifact) {
-              nearbyArtifact.collect();
-              mathMemory.recordOperation(nearbyArtifact.a, nearbyArtifact.b, nearbyArtifact.result);
-              particles?.burst(nearbyArtifact.position.x, nearbyArtifact.position.y, 'spark', 20);
-              floatingTextsRef.current.push(
-                new FloatingText(
-                  nearbyArtifact.position.x,
-                  nearbyArtifact.position.y - 40,
-                  `${nearbyArtifact.result}`,
-                  'result',
-                  1800
-                )
-              );
-              visualEffects?.setBloom(0.5, 300);
-              coinsRef.current?.spawnCoins(
-                nearbyArtifact.position.x,
-                nearbyArtifact.position.y,
-                2
-              );
-            } else {
-              // Monster interaction
-              const nearby = monstersRef.current.find(
-                (m) =>
-                  !m.isDead() &&
-                  !m.isDying() &&
-                  centerDistX(player.getBounds(), m.getBounds()) < INTERACT_DIST,
-              );
-              if (nearby) {
-                player.velocity.x = 0;
-                if (player.state === 'running') player.state = 'idle';
-                activeMonsterRef.current = nearby;
-                // Use the monster's own operation so label and question match
-                const q = nearby.operation
-                  ? math.generateQuestionForOperation(nearby.operation.a, nearby.operation.b)
-                  : math.generateQuestion();
-                questionRef.current = q;
-                setCurrentQuestion(q);
-                // Answer time limit: starts 14 s, ramps to 5 s over ~3 min
-                answerTimeLimitRef.current = Math.max(5000, 14000 - gameTimeRef.current * 50);
-                answerTimerRef.current = 0;
-                setAnswerTimeLeft(1);
-                syncPhase('question');
-              } else {
-                player.attack();
-              }
-            }
-          }
-        }
+      if (input.isDown('ArrowRight')) {
+        player.velocity.x = player.MOVE_SPEED;
+        player.facingRight = true;
+        if (player.isOnGround && player.state !== 'attacking') player.state = 'running';
+      } else if (input.isDown('ArrowLeft')) {
+        player.velocity.x = -player.MOVE_SPEED * 0.6;
+        player.facingRight = false;
+        if (player.isOnGround && player.state !== 'attacking') player.state = 'running';
+      } else {
+        player.velocity.x = 0;
+        if (player.isOnGround && player.state === 'running') player.state = 'idle';
       }
 
-      // ══ ANSWER TIMER (question phase) ══════════════════════════════════════
-      if (ph === 'question' && !answerLockedRef.current) {
-        answerTimerRef.current += delta;
-        const fraction = Math.max(0, 1 - answerTimerRef.current / answerTimeLimitRef.current);
-        setAnswerTimeLeft(fraction);
-        if (fraction <= 0) {
-          handleAnswer(-1); // Timeout = wrong answer
-        }
-      }
+      if (input.wasPressed('ArrowUp')) player.jump();
 
-      // ══ UPDATE ═════════════════════════════════════════════════════════════
-      visualEffects?.update(delta);
-      particles?.update(delta);
-      comboSys.update(delta);
+      if (input.wasPressed('Space')) {
+        player.attack();
 
-      if (ph === 'learning' || ph === 'playing') {
-        forest.update(delta);
-        player.update(delta, GROUND_Y);
-      }
+        const pCX = player.position.x + player.size.width  / 2;
+        const pCY = player.position.y + player.size.height * 0.5;
+        const dir = player.facingRight ? 1 : -1;
+        const aCX = pCX + dir * ATTACK_REACH * 0.5;
 
-      if (ph === 'learning') {
-        giftsRef.current.forEach((g) => g.update(delta, GROUND_Y));
-        giftsRef.current.forEach((g) => {
-          if (g.isOpen()) g.startDisappearing();
-        });
-        giftsRef.current = giftsRef.current.filter((g) => g.position.x > -50 && g.state !== 'gone');
+        // ── Find nearest projectile within reach ──
+        let nearestIdx  = -1;
+        let nearestDist = ATTACK_REACH * 1.15;
 
-        const allGone = giftsRef.current.length === 0;
-        if (allGone && learning.getLearnedOps().length > 0) {
-          syncPhase('playing');
-        }
-      } else if (ph === 'playing') {
-        gameTimeRef.current += delta / 1000;
-        const t = gameTimeRef.current;
-
-        // ── Spawn ──────────────────────────────────────────────────────────
-        // Interval ramps from 7 s down to 1.8 s over ~4 minutes
-        spawnTimerRef.current += delta;
-        const spawnInterval = Math.max(1800, 7000 - t * 21);
-        if (spawnTimerRef.current >= spawnInterval) {
-          spawnTimerRef.current = 0;
-
-          if (tableProg.isArtifactSubPhase()) {
-            // ── Artifact sub-phase: next op in table sequence ──
-            const op = tableProg.nextArtifactOp();
-            const artifact = new LearningArtifact(GAME_W + 50, GROUND_Y - 60, op.a, op.b, monsterIdRef.current++);
-            artifactsRef.current.push(artifact);
-            // Sync table (phase may have just switched to monster sub-phase)
-            const tblAfter = tableProg.getCurrentTable();
-            setCurrentTable(tblAfter === 0 ? 10 : tblAfter);
-          } else {
-            // ── Monster sub-phase: random op from current table ──
-            const rnd = Math.random();
-            if (t > 90 && rnd < 0.15) {
-              const op = tableProg.randomMonsterOp();
-              const ogre = new OgreMonster(GAME_W + 80, GROUND_Y - 60, monsterIdRef.current++, { a: op.a, b: op.b, op: '×' });
-              ogre.velocity.x = difficultySys.getMonsterSpeed(-44);
-              monstersRef.current.push(ogre);
-            } else if (t > 60 && rnd < 0.30) {
-              const op = tableProg.randomMonsterOp();
-              const eagle = new EagleMonster(GAME_W + 80, GROUND_Y - 145, monsterIdRef.current++, { a: op.a, b: op.b, op: '×' });
-              eagle.velocity.x = difficultySys.getMonsterSpeed(-100);
-              monstersRef.current.push(eagle);
-            } else if (rnd < 0.60) {
-              const op = tableProg.randomMonsterOp();
-              const snake = new SnakeMonster(GAME_W + 80, GROUND_Y - 24, monsterIdRef.current++, { a: op.a, b: op.b, op: '×' });
-              snake.velocity.x = difficultySys.getMonsterSpeed(snake.velocity.x);
-              monstersRef.current.push(snake);
-            } else {
-              const op = tableProg.randomMonsterOp();
-              const m = new Monster(GAME_W + 80, GROUND_Y - 34, monsterIdRef.current++, { a: op.a, b: op.b, op: '×' });
-              m.velocity.x = difficultySys.getMonsterSpeed(m.velocity.x);
-              monstersRef.current.push(m);
-            }
-            tableProg.onMonsterSpawned();
-            // Sync table (may have advanced to next table after enough monsters)
-            const tbl = tableProg.getCurrentTable();
-            setCurrentTable(tbl === 0 ? 10 : tbl);
-          }
+        for (let i = 0; i < projectilesRef.current.length; i++) {
+          const p = projectilesRef.current[i];
+          if (!p.active) continue;
+          const d = Math.hypot(p.x - aCX, p.y - pCY);
+          if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
         }
 
-        // Update and cull monsters
-        monstersRef.current = monstersRef.current.filter((m) => {
-          m.update(delta, GROUND_Y);
-          if (m.isDead()) return false;
-          if (m.position.x <= -120) {
-            // Eagle escaped without being answered → lose a life
-            if (m instanceof EagleMonster) {
-              sys.loseLife();
-              setLives(sys.lives);
-              player.hurt();
-              visualEffects?.shake(5, 200);
-              floatingTextsRef.current.push(
-                new FloatingText(100, GROUND_Y - 100, 'Águia fugiu! -1', 'damage', 1500)
-              );
-              if (sys.isGameOver()) {
-                setHighScore(sys.getHighScore());
-                tableProgressionRef.current?.saveCheckpoint();
-                syncPhase('gameover');
-              }
-            }
-            return false;
-          }
-          return true;
-        });
+        if (nearestIdx >= 0) {
+          const proj = projectilesRef.current[nearestIdx];
+          proj.active = false;
 
-        // Separate overlapping monsters (push apart horizontally)
-        const monsters = monstersRef.current;
-        for (let i = 0; i < monsters.length; i++) {
-          for (let j = i + 1; j < monsters.length; j++) {
-            const a = monsters[i];
-            const b = monsters[j];
-            const minDist = a.size.width * 0.5 + b.size.width * 0.5 + 4;
-            const dx = b.position.x - a.position.x;
-            if (Math.abs(dx) < minDist) {
-              const push = (minDist - Math.abs(dx)) / 2;
-              const dir = dx >= 0 ? 1 : -1;
-              a.position.x -= push * dir;
-              b.position.x += push * dir;
-            }
-          }
-        }
+          if (proj.isCorrect) {
+            combSys.hit();
+            const c = combSys.getCombo();
+            setCombo(c);
 
-        // Update and cull artifacts
-        artifactsRef.current = artifactsRef.current.filter((a) => a.isAlive());
-        artifactsRef.current.forEach((a) => a.update(delta));
+            hammer.charge(c);
+            setHammerState(hammer.state);
+            setHammerEnergy(hammer.getEnergyFraction());
 
-        // Update coins
-        coinsRef.current?.update(delta);
+            difficulty.onCorrect();
 
-        // Collision with coins
-        const coins = coinsRef.current?.getCoins() || [];
-        for (let i = coins.length - 1; i >= 0; i--) {
-          const coin = coins[i];
-          const dist = Math.hypot(
-            coin.getBounds().x - (player.position.x + player.size.width / 2),
-            coin.getBounds().y - (player.position.y + player.size.height / 2)
-          );
-          if (dist < 30) {
-            floatingTextsRef.current.push(
-              new FloatingText(coin.getBounds().x, coin.getBounds().y - 20, '+10', 'score', 800)
-            );
-            coinsRef.current?.collectCoin(i);
-            sys.addScore(10);
+            const [aP, bP] = proj.equationId.split('x').map(Number);
+            if (!isNaN(aP) && !isNaN(bP)) memory.recordOperation(aP, bP, aP * bP);
+
+            const pts = math.getPointsForCorrect(sys.level) * combSys.getMultiplier();
+            sys.addScore(pts);
             setScore(sys.score);
-            particles?.burst(coin.getBounds().x, coin.getBounds().y, 'spark', 5);
-          }
-        }
+            setLevel(sys.level);
+            math.setMaxFactor(2 + sys.level);
 
-        // Collision damage with monsters
-        if (!player.isInvincible()) {
-          for (const m of monstersRef.current) {
-            if (!m.isDying() && rectsOverlap(player.getBounds(), m.getBounds())) {
-              sys.loseLife();
-              setLives(sys.lives);
-              player.hurt();
-              visualEffects?.shake(6, 250);
-              if (sys.isGameOver()) {
-                setHighScore(sys.getHighScore());
-                tableProgressionRef.current?.saveCheckpoint();
-                syncPhase('gameover');
+            sound.play('correct_answer');
+            if (hammer.state === 'supercharged') sound.play('hammer_supercharge');
+            else                                 sound.play('hammer_charge');
+
+            particles.burst(proj.x, proj.y, 'spark',  18);
+            particles.burst(proj.x, proj.y, 'energy', 10);
+
+            floatingTextsRef.current.push(
+              new FloatingText(proj.x, proj.y - 32, `+${pts}`, 'score',   900),
+              new FloatingText(proj.x, proj.y - 60, `${proj.value} ✓`, 'correct', 1100),
+            );
+
+            if (c > 1) {
+              sound.play('combo');
+              vfx.shake(6, 250);
+              floatingTextsRef.current.push(
+                new FloatingText(GAME_W / 2, 115, `COMBO x${c}!`, 'combo', 900),
+              );
+            }
+
+            for (const p of projectilesRef.current) {
+              if (p.active && p.equationId === proj.equationId) p.active = false;
+            }
+
+            for (const m of monstersRef.current) {
+              if (m.operation && `${m.operation.a}x${m.operation.b}` === proj.equationId) {
+                m.resetAttackWindow();
+                m.attackCooldown = 3000 + Math.random() * 2000;
               }
-              break;
+            }
+
+          } else {
+            combSys.miss();
+            setCombo(0);
+            difficulty.onWrong();
+
+            const [aP, bP] = proj.equationId.split('x').map(Number);
+            if (!isNaN(aP) && !isNaN(bP)) memory.recordWrong(aP, bP);
+
+            sys.loseLife();
+            setLives(sys.lives);
+            player.hurt();
+            vfx.shake(7, 320);
+
+            sound.play('wrong_answer');
+            sound.play('player_damage');
+
+            particles.burst(proj.x, proj.y, 'explosion', 12);
+            floatingTextsRef.current.push(
+              new FloatingText(proj.x, proj.y - 30, '✗', 'wrong', 800),
+            );
+
+            const correctProj = projectilesRef.current.find(
+              (p) => p.equationId === proj.equationId && p.isCorrect,
+            );
+            if (correctProj) {
+              floatingTextsRef.current.push(
+                new FloatingText(pCX, pCY - 75, `Correto: ${correctProj.value}`, 'message', 2200),
+              );
+            }
+
+            for (const p of projectilesRef.current) {
+              if (p.active && p.equationId === proj.equationId) p.active = false;
+            }
+
+            if (sys.isGameOver()) {
+              sound.play('game_over');
+              setHighScore(sys.getHighScore());
+              tableProgressionRef.current?.saveCheckpoint();
+              syncPhase('gameover');
+              return;
+            }
+          }
+
+        } else {
+          // ── No projectile cut ──
+          const nearArtifact = artifactsRef.current.find(
+            (a) => a.state === 'active' && rectsOverlap(player.getBounds(), a.getBounds()),
+          );
+
+          if (nearArtifact) {
+            nearArtifact.collect();
+            memory.recordOperation(nearArtifact.a, nearArtifact.b, nearArtifact.result);
+            sound.play('gift_collect');
+            const ax = nearArtifact.position.x + nearArtifact.size.width / 2;
+            particles.burst(ax, nearArtifact.position.y, 'spark', 18);
+            floatingTextsRef.current.push(
+              new FloatingText(ax, nearArtifact.position.y - 50, `${nearArtifact.result}`, 'result', 2000),
+            );
+            coinSys.spawnCoins(ax, nearArtifact.position.y, 2);
+            sound.play('result_reveal');
+          } else {
+            const nearMon = monstersRef.current.find(
+              (m) =>
+                !m.isDead() && !m.isDying() &&
+                Math.abs(m.position.x + m.size.width / 2 - pCX) < 120,
+            );
+            if (nearMon) {
+              if (hammer.isCharged()) {
+                nearMon.hit();
+                hammer.consume();
+                setHammerState(hammer.state);
+                setHammerEnergy(hammer.getEnergyFraction());
+
+                const mCX = nearMon.position.x + nearMon.size.width / 2;
+                sound.play('monster_hit');
+                vfx.shake(5, 200);
+                particles.burst(mCX, nearMon.position.y, 'explosion', 14);
+                particles.burst(mCX, nearMon.position.y, 'star', 8);
+
+                if (nearMon.isDying()) {
+                  const pts = (nearMon.isBoss ? 150 : 50) * sys.level;
+                  sys.addScore(pts);
+                  setScore(sys.score);
+                  setLevel(sys.level);
+                  math.setMaxFactor(2 + sys.level);
+                  coinSys.spawnCoins(mCX, nearMon.position.y, nearMon.isBoss ? 6 : 3);
+                  sound.play('monster_defeated');
+                  floatingTextsRef.current.push(
+                    new FloatingText(mCX, nearMon.position.y - 40, `+${pts}`, 'score', 1400),
+                  );
+                  particles.burst(mCX, nearMon.position.y, 'explosion', 22);
+                }
+              } else {
+                player.hurt();
+                sys.loseLife();
+                setLives(sys.lives);
+                vfx.shake(5, 200);
+                sound.play('player_damage');
+                floatingTextsRef.current.push(
+                  new FloatingText(pCX, pCY - 60, 'Carregue o martelo!', 'message', 1800),
+                );
+                if (sys.isGameOver()) {
+                  sound.play('game_over');
+                  setHighScore(sys.getHighScore());
+                  tableProgressionRef.current?.saveCheckpoint();
+                  syncPhase('gameover');
+                  return;
+                }
+              }
             }
           }
         }
       }
 
-      // Update floating texts
-      for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
-        const ft = floatingTextsRef.current[i];
-        ft.update(delta);
-        if (!ft.isAlive()) {
-          floatingTextsRef.current.splice(i, 1);
+      // ══════════════════════════════════════════════════════════════════════
+      // UPDATE
+      // ══════════════════════════════════════════════════════════════════════
+
+      const worldScroll = player.velocity.x > 0
+        ? WORLD_SCROLL * difficulty.getSpeedMultiplier()
+        : 0;
+      forest.update(delta, worldScroll);
+
+      vfx.update(delta);
+      particles.update(delta);
+      combSys.update(delta);
+      hammer.update(delta);
+      player.update(delta, GROUND_Y);
+
+      if (hammer.state !== prevHammerStateRef.current) {
+        prevHammerStateRef.current = hammer.state;
+        setHammerState(hammer.state);
+      }
+      setHammerEnergy(hammer.getEnergyFraction());
+
+      if (hammer.isCharged() && hammer.energy > hammer.maxEnergy - 5) {
+        const pCXr = player.position.x + player.size.width / 2;
+        for (const m of monstersRef.current) {
+          if (!m.isDead() && !m.isDying() &&
+              Math.abs(m.position.x + m.size.width / 2 - pCXr) < 260) {
+            m.recoilFromHammer();
+          }
         }
       }
 
-      // ══ RENDER ═════════════════════════════════════════════════════════════
-      const shake = visualEffects?.getShakeOffset() || { x: 0, y: 0 };
-      ctx.clearRect(0, 0, GAME_W, GAME_H);
+      // ── Spawn ──
+      gameTimeRef.current += delta / 1000;
+      spawnTimerRef.current += delta;
+      const spawnInterval = Math.max(1800, 7000 - gameTimeRef.current * 20);
 
+      if (spawnTimerRef.current >= spawnInterval) {
+        spawnTimerRef.current = 0;
+
+        if (tableProg.isArtifactSubPhase()) {
+          const op = tableProg.nextArtifactOp();
+          artifactsRef.current.push(
+            new LearningArtifact(GAME_W + 50, GROUND_Y - 60, op.a, op.b, monsterIdRef.current++),
+          );
+          const tbl = tableProg.getCurrentTable();
+          setCurrentTable(tbl === 0 ? 10 : tbl);
+        } else {
+          const rnd = Math.random();
+          const op  = tableProg.randomMonsterOp();
+          const t   = gameTimeRef.current;
+
+          if (t > 90 && rnd < 0.15) {
+            const ogre = new OgreMonster(GAME_W + 80, GROUND_Y - 60, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' }, 2);
+            ogre.velocity.x = difficulty.getMonsterSpeed(-44);
+            monstersRef.current.push(ogre);
+          } else if (t > 60 && rnd < 0.30) {
+            const eagle = new EagleMonster(GAME_W + 80, GROUND_Y - 145, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' });
+            eagle.velocity.x = difficulty.getMonsterSpeed(-100);
+            monstersRef.current.push(eagle);
+          } else if (rnd < 0.60) {
+            const snake = new SnakeMonster(GAME_W + 80, GROUND_Y - 24, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' });
+            snake.velocity.x = difficulty.getMonsterSpeed(snake.velocity.x);
+            monstersRef.current.push(snake);
+          } else {
+            const m = new Monster(GAME_W + 80, GROUND_Y - 34, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' });
+            m.velocity.x = difficulty.getMonsterSpeed(m.velocity.x);
+            monstersRef.current.push(m);
+          }
+
+          tableProg.onMonsterSpawned();
+          const tbl = tableProg.getCurrentTable();
+          setCurrentTable(tbl === 0 ? 10 : tbl);
+        }
+      }
+
+      // ── Monsters ──
+      const pCXupd = player.position.x + player.size.width / 2;
+
+      monstersRef.current = monstersRef.current.filter((m) => {
+        m.update(delta, GROUND_Y);
+        if (m.isDead()) return false;
+
+        if (m.position.x <= -160) {
+          if (m instanceof EagleMonster) {
+            sys.loseLife();
+            setLives(sys.lives);
+            player.hurt();
+            vfx.shake(5, 200);
+            sound.play('player_damage');
+            floatingTextsRef.current.push(
+              new FloatingText(120, GROUND_Y - 100, 'Monstro fugiu! -❤️', 'damage', 1500),
+            );
+            if (sys.isGameOver()) {
+              sound.play('game_over');
+              setHighScore(sys.getHighScore());
+              tableProgressionRef.current?.saveCheckpoint();
+              syncPhase('gameover');
+            }
+          }
+          return false;
+        }
+
+        if (m.operation && m.canAttack(pCXupd)) {
+          m.triggerAttack();
+          const { a, b } = m.operation;
+          const answer = a * b;
+          const lv = sys.level;
+          const assist: VisualAssistLevel = lv <= 3 ? 'clear' : lv <= 7 ? 'subtle' : 'none';
+          const options = math.buildProjectileOptions(answer, a, b, 4);
+          const mCX = m.position.x + m.size.width / 2;
+          const mCY = m.position.y + m.size.height * 0.45;
+
+          options.forEach((val, i) => {
+            const spread = (i / (options.length - 1) - 0.5);
+            const vx = -(200 + Math.random() * 55);
+            const vy = -130 + spread * 200;
+            projectilesRef.current.push(
+              new AnswerProjectile(
+                mCX + (Math.random() - 0.5) * 16,
+                mCY + (Math.random() - 0.5) * 16,
+                vx, vy,
+                val, val === answer, `${a}x${b}`, assist,
+              ),
+            );
+          });
+        }
+
+        return true;
+      });
+
+      // Separate overlapping monsters
+      for (let i = 0; i < monstersRef.current.length; i++) {
+        for (let j = i + 1; j < monstersRef.current.length; j++) {
+          const a = monstersRef.current[i];
+          const b = monstersRef.current[j];
+          const minD = (a.size.width + b.size.width) * 0.5 + 4;
+          const dx   = b.position.x - a.position.x;
+          if (Math.abs(dx) < minD) {
+            const push = (minD - Math.abs(dx)) * 0.5;
+            const dir  = dx >= 0 ? 1 : -1;
+            a.position.x -= push * dir;
+            b.position.x += push * dir;
+          }
+        }
+      }
+
+      // ── Artifacts ──
+      artifactsRef.current = artifactsRef.current.filter((a) => a.isAlive());
+      artifactsRef.current.forEach((a) => a.update(delta));
+
+      // ── Projectiles ──
+      projectilesRef.current = projectilesRef.current.filter((p) => p.active);
+      projectilesRef.current.forEach((p) => p.update(delta, GROUND_Y));
+
+      // ── Coins ──
+      coinSys.update(delta);
+      const coins   = coinSys.getCoins();
+      const pCXcoin = player.position.x + player.size.width / 2;
+      const pCYcoin = player.position.y + player.size.height * 0.5;
+      for (let i = coins.length - 1; i >= 0; i--) {
+        const c = coins[i];
+        if (Math.hypot(c.getBounds().x - pCXcoin, c.getBounds().y - pCYcoin) < 34) {
+          floatingTextsRef.current.push(
+            new FloatingText(c.getBounds().x, c.getBounds().y - 20, '+10', 'score', 700),
+          );
+          coinSys.collectCoin(i);
+          sys.addScore(10);
+          setScore(sys.score);
+          sound.play('coin_collect');
+          particles.burst(c.getBounds().x, c.getBounds().y, 'spark', 5);
+        }
+      }
+
+      // ── Passive monster collision ──
+      if (!player.isInvincible()) {
+        for (const m of monstersRef.current) {
+          if (!m.isDying() && rectsOverlap(player.getBounds(), m.getBounds())) {
+            if (hammer.isCharged()) {
+              m.hit();
+              hammer.consume();
+              setHammerState(hammer.state);
+              setHammerEnergy(hammer.getEnergyFraction());
+              const mCX = m.position.x + m.size.width / 2;
+              sound.play('monster_hit');
+              particles.burst(mCX, m.position.y, 'explosion', 10);
+              if (m.isDying()) {
+                const pts = (m.isBoss ? 150 : 50) * sys.level;
+                sys.addScore(pts);
+                setScore(sys.score);
+                coinSys.spawnCoins(mCX, m.position.y, 3);
+                sound.play('monster_defeated');
+              }
+            } else {
+              sys.loseLife();
+              setLives(sys.lives);
+              player.hurt();
+              vfx.shake(6, 260);
+              sound.play('player_damage');
+              if (sys.isGameOver()) {
+                sound.play('game_over');
+                setHighScore(sys.getHighScore());
+                tableProgressionRef.current?.saveCheckpoint();
+                syncPhase('gameover');
+              }
+            }
+            break;
+          }
+        }
+      }
+
+      // ── Floating texts ──
+      floatingTextsRef.current = floatingTextsRef.current.filter((ft) => {
+        ft.update(delta);
+        return ft.isAlive();
+      });
+
+      // Nearest monster equation for HUD
+      const approaching = monstersRef.current
+        .filter((m) => !m.isDying() && !m.isDead() && m.operation)
+        .sort((a, b) => a.position.x - b.position.x)
+        .at(-1);
+      setCurrentEquation(
+        approaching?.operation ? `${approaching.operation.a} × ${approaching.operation.b}` : undefined,
+      );
+
+      // ══════════════════════════════════════════════════════════════════════
+      // RENDER
+      // ══════════════════════════════════════════════════════════════════════
+      const shake = vfx.getShakeOffset();
+      ctx.clearRect(0, 0, GAME_W, GAME_H);
       ctx.save();
       ctx.translate(shake.x, shake.y);
-      forest.draw(ctx, GAME_W, GAME_H);
 
-      if (ph === 'learning') {
-        for (const g of giftsRef.current) {
-          g.draw(ctx);
-        }
-        // Render particles in learning phase too (smoke bursts)
-        particles?.draw(ctx);
+      forest.draw(ctx, GAME_W, GAME_H);
+      coinSys.draw(ctx);
+
+      for (const a of artifactsRef.current) {
+        a.draw(ctx);
+        a.drawLabel(ctx);
       }
 
-      if (ph === 'playing') {
-        // Draw coins
-        coinsRef.current?.draw(ctx);
+      for (const p of projectilesRef.current) {
+        p.draw(ctx);
+      }
 
-        // Draw artifacts
-        for (const artifact of artifactsRef.current) {
-          artifact.draw(ctx);
-          artifact.drawLabel(ctx);
-        }
+      for (const m of monstersRef.current) {
+        m.draw(ctx);
 
-        // Draw monsters
-        for (const m of monstersRef.current) {
-          m.draw(ctx);
-          if (m.operation) {
-            const opText = `${m.operation.a} × ${m.operation.b}`;
-            ctx.save();
-            
-            // Shadow text
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-            ctx.font = 'bold 32px Arial';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
-            ctx.fillText(opText, m.position.x + m.size.width / 2 + 2, m.position.y - 5 + 2);
-
-            // Main text with glow
-            ctx.fillStyle = '#ffff44';
-            ctx.shadowColor = 'rgba(255, 220, 0, 0.8)';
-            ctx.shadowBlur = 15;
-            ctx.font = 'bold 32px Arial';
-            ctx.fillText(opText, m.position.x + m.size.width / 2, m.position.y - 5);
-
-            // Outline
-            ctx.strokeStyle = '#ff8800';
-            ctx.lineWidth = 2;
-            ctx.strokeText(opText, m.position.x + m.size.width / 2, m.position.y - 5);
-
-            ctx.restore();
-          }
-
-          // Distance indicator
-          if (!m.isDying() && centerDistX(player.getBounds(), m.getBounds()) < INTERACT_DIST) {
-            ctx.save();
-            ctx.strokeStyle = 'rgba(255,220,50,0.7)';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.arc(
-              m.position.x + m.size.width / 2,
-              m.position.y + m.size.height / 2,
-              m.size.width * 0.9,
-              0,
-              Math.PI * 2
-            );
-            ctx.stroke();
-            ctx.restore();
-          }
+        if (m.operation && !m.isDying()) {
+          const opText = `${m.operation.a} × ${m.operation.b}`;
+          const mx = m.position.x + m.size.width / 2;
+          const my = m.position.y;
+          ctx.save();
+          ctx.font = 'bold 26px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillStyle = 'rgba(0,0,0,0.55)';
+          ctx.fillText(opText, mx + 2, my - 3 + 2);
+          ctx.shadowBlur  = 12;
+          ctx.shadowColor = 'rgba(255,220,0,0.8)';
+          ctx.fillStyle   = '#ffe844';
+          ctx.fillText(opText, mx, my - 3);
+          ctx.strokeStyle = '#ff8800';
+          ctx.lineWidth   = 1.5;
+          ctx.shadowBlur  = 0;
+          ctx.strokeText(opText, mx, my - 3);
+          ctx.restore();
         }
       }
 
       player.draw(ctx);
 
-      // Floating texts
+      // Hammer glow
+      if (hammer.isCharged()) {
+        const hx = player.position.x + player.size.width  / 2;
+        const hy = player.position.y + player.size.height * 0.35;
+        const r  = hammer.state === 'supercharged' ? 56 : 40;
+        const glow = ctx.createRadialGradient(hx, hy, 0, hx, hy, r);
+        glow.addColorStop(0, hammer.state === 'supercharged' ? 'rgba(255,110,0,0.65)' : 'rgba(255,220,0,0.55)');
+        glow.addColorStop(1, 'rgba(255,200,0,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(hx, hy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       for (const ft of floatingTextsRef.current) {
         ft.draw(ctx);
       }
 
+      particles.draw(ctx);
+
+      // Artifact collect prompt
+      const nearArt = artifactsRef.current.some(
+        (a) => a.state === 'active' && rectsOverlap(player.getBounds(), a.getBounds()),
+      );
+      if (nearArt) {
+        const px = GAME_W / 2;
+        const py = GROUND_Y - 38;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.beginPath();
+        ctx.roundRect(px - 130, py, 260, 26, 6);
+        ctx.fill();
+        ctx.fillStyle    = '#ffe87c';
+        ctx.font         = 'bold 11px "Courier New", monospace';
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('[ ESPAÇO ] → Coletar!', px, py + 13);
+      }
+
       ctx.restore();
-
-      // Learning instruction
-      if (ph === 'learning') {
-        ctx.save();
-        ctx.fillStyle = '#ffe87c';
-        ctx.font = 'bold 14px "Press Start 2P", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillText('Memorize os presentes!', GAME_W / 2, 30);
-        ctx.font = '11px "Courier New", monospace';
-        ctx.fillText('Bata neles e veja o resultado', GAME_W / 2, 50);
-        ctx.restore();
-      }
-
-      // Combo display
-      if (combo > 1) {
-        ctx.save();
-        ctx.fillStyle = '#ffaa00';
-        ctx.font = `bold ${20 + combo * 2}px Arial`;
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'top';
-        ctx.fillText(`COMBO x${combo}`, GAME_W - 20, 20);
-        ctx.restore();
-      }
-
-      // SPACE prompt
-      if (ph === 'playing') {
-        const nearMonster = monstersRef.current.some(
-          (m) =>
-            !m.isDead() &&
-            !m.isDying() &&
-            centerDistX(player.getBounds(), m.getBounds()) < INTERACT_DIST,
-        );
-        const nearArtifact = artifactsRef.current.some(
-          (a) => a.state === 'active' && rectsOverlap(player.getBounds(), a.getBounds())
-        );
-
-        if (nearMonster || nearArtifact) {
-          ctx.save();
-          ctx.fillStyle = 'rgba(0,0,0,0.55)';
-          const bw = 280;
-          const bx = GAME_W / 2 - bw / 2;
-          const by = GROUND_Y - 34;
-          ctx.beginPath();
-          ctx.roundRect(bx, by, bw, 26, 6);
-          ctx.fill();
-          ctx.fillStyle = '#ffe87c';
-          ctx.font = 'bold 12px "Courier New", monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          const promptText = nearArtifact ? '[ ESPAÇO ] → Coletar!' : '[ ESPAÇO ] → Responder!';
-          ctx.fillText(promptText, GAME_W / 2, by + 13);
-          ctx.restore();
-        }
-      }
-
       input.flush();
     });
 
     return () => {
       loop.stop();
       input.destroy();
+      sound.destroy();
       window.removeEventListener('resize', onResize);
     };
   }, [syncPhase]);
 
-  // ─── Keyboard shortcut for question answers (1-4) ──────────────────────────
+  // ─── Fullscreen ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (phase !== 'question' || !currentQuestion) return;
-    const onKey = (e: KeyboardEvent) => {
-      const map: Record<string, number> = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3 };
-      const idx = map[e.code];
-      if (idx !== undefined && idx < currentQuestion.options.length) {
-        handleAnswer(currentQuestion.options[idx]);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [phase, currentQuestion, handleAnswer]);
-
-  // ─── Fullscreen handling ──────────────────────────────────────────────────
-  useEffect(() => {
-    const onFull = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-      // If entering fullscreen, attempt to lock orientation to landscape
-      if (document.fullscreenElement) {
-        try {
-          (screen as any)?.orientation?.lock('landscape').catch?.(() => {});
-        } catch (e) {
-          // ignore
-        }
-      } else {
-        try { (screen as any)?.orientation?.unlock?.(); } catch (e) {}
-      }
-    };
-    window.addEventListener('fullscreenchange', onFull);
-    return () => window.removeEventListener('fullscreenchange', onFull);
+    const h = () => setIsFullscreen(!!document.fullscreenElement);
+    window.addEventListener('fullscreenchange', h);
+    return () => window.removeEventListener('fullscreenchange', h);
   }, []);
 
   const toggleFullscreen = async () => {
-    const wrap = wrapRef.current;
     try {
-      if (!document.fullscreenElement) {
-        if (wrap && wrap.requestFullscreen) {
-          await wrap.requestFullscreen();
-          setIsFullscreen(true);
-        }
-      } else {
-        if (document.exitFullscreen) {
-          await document.exitFullscreen();
-          setIsFullscreen(false);
-        }
-      }
-    } catch (err) {
-      // ignore fullscreen errors
-    }
+      if (!document.fullscreenElement) await wrapRef.current?.requestFullscreen();
+      else                             await document.exitFullscreen();
+    } catch { /* ignore */ }
   };
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
+  const handleToggleSound = useCallback(() => {
+    soundRef.current?.toggle();
+    setSoundMuted(soundRef.current?.isMuted() ?? false);
+  }, []);
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div ref={wrapRef} className="game-wrap">
+    <div ref={wrapRef} className="game-wrap" style={{ touchAction: 'none' }}>
       <canvas ref={canvasRef} className="game-canvas" />
 
-      <HUD lives={lives} score={score} level={level} highScore={highScore} combo={combo} currentTable={currentTable} />
-
-      {phase === 'question' && currentQuestion && (
-        <QuestionPanel
-          question={currentQuestion}
-          onAnswer={handleAnswer}
-          selectedAnswer={selectedAnswer}
-          answerResult={answerResult}
-          timeLeft={answerTimeLeft}
-        />
-      )}
+      <HUD
+        lives={lives}
+        score={score}
+        level={level}
+        highScore={highScore}
+        combo={combo}
+        currentTable={currentTable}
+        hammerState={hammerState}
+        hammerEnergy={hammerEnergy}
+        currentEquation={currentEquation}
+        soundMuted={soundMuted}
+        onToggleSound={handleToggleSound}
+      />
 
       {phase === 'gameover' && (
         <GameOver score={score} highScore={highScore} onRestart={handleRestart} />
       )}
 
-      <MobileControls inputManager={inputRef.current} />
+      <MobileControls
+        inputManager={inputRef.current}
+        soundMuted={soundMuted}
+        onToggleSound={handleToggleSound}
+      />
 
-      <button className="fullscreen-btn" onClick={toggleFullscreen} aria-pressed={isFullscreen}>
+      <button
+        className="fullscreen-btn"
+        onClick={toggleFullscreen}
+        aria-pressed={isFullscreen}
+      >
         {isFullscreen ? 'Sair Tela Cheia' : 'Tela Cheia'}
       </button>
-
-      {/* Portrait-mode hint — shown via CSS only on portrait screens */}
-      <div className="portrait-overlay">
-        <div className="portrait-overlay__icon">📱</div>
-        <p>Gire o celular</p>
-        <p>para jogar</p>
-      </div>
     </div>
   );
 }
