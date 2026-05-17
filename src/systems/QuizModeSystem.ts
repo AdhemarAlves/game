@@ -149,6 +149,14 @@ export class QuizModeSystem {
     this.triggeredMonsters.delete(monsterId);
   }
 
+  /**
+   * Re-enable a monster ID so it can trigger a new quiz.
+   * Used by the boss battle to recycle the same boss ID across patrol cycles.
+   */
+  clearTrigger(monsterId: number): void {
+    this.triggeredMonsters.delete(monsterId);
+  }
+
   reset(): void {
     this.quiz = null;
     this.triggeredMonsters.clear();

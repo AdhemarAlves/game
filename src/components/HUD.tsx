@@ -1,7 +1,8 @@
 import type { HammerState } from '../types';
 
 interface HUDProps {
-  lives: number;
+  hp: number;           // Current HP
+  maxHp: number;        // Max HP
   score: number;
   level: number;
   highScore: number;
@@ -15,7 +16,8 @@ interface HUDProps {
 }
 
 export function HUD({
-  lives,
+  hp,
+  maxHp,
   score,
   level,
   highScore,
@@ -27,11 +29,13 @@ export function HUD({
   soundMuted,
   onToggleSound,
 }: HUDProps) {
-  const livesFrac      = lives / 3;
-  const livesBarColor  = livesFrac > 0.66 ? '#44ee44' : livesFrac > 0.33 ? '#ffcc00' : '#ee3333';
+  const hpFrac        = hp / maxHp;
+  const hpColor       = hpFrac > 0.66 ? '#44ee44' : hpFrac > 0.33 ? '#ffcc00' : '#ee3333';
 
   const hammerColor =
-    hammerState === 'supercharged'
+    hammerState === 'giant'
+      ? '#ffff00'
+      : hammerState === 'supercharged'
       ? '#ff8800'
       : hammerState === 'charged'
       ? '#ffcc00'
@@ -42,20 +46,21 @@ export function HUD({
 
   return (
     <div className="hud">
-      {/* ── Left: health bar ── */}
+      {/* ── Left: HP bar ── */}
       <div className="hud-lives">
         <span className="hud-lives-icon">❤️</span>
         <div className="hud-lives-bar-bg">
           <div
             className="hud-lives-bar-fill"
             style={{
-              width: `${Math.round(livesFrac * 100)}%`,
-              background: livesBarColor,
-              boxShadow: livesFrac < 0.4 ? `0 0 7px ${livesBarColor}` : 'none',
+              width: `${Math.round(hpFrac * 100)}%`,
+              background: hpColor,
+              boxShadow: hpFrac < 0.4 ? `0 0 7px ${hpColor}` : 'none',
+              transition: 'width 0.3s ease, background 0.3s ease',
             }}
           />
         </div>
-        <span className="hud-lives-count">{lives}</span>
+        <span className="hud-lives-count">{Math.ceil(hp)}/{maxHp}</span>
       </div>
 
       {/* ── Center: hammer + equation ── */}

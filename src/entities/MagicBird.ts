@@ -1,6 +1,6 @@
 import type { Vec2 } from '../types';
 
-export type BirdState = 'flying_in' | 'hovering' | 'teaching' | 'idle' | 'captured';
+export type BirdState = 'flying_in' | 'hovering' | 'teaching' | 'idle' | 'scared' | 'captured' | 'rescued';
 
 /**
  * The magic bird tutor that flies in, teaches multiplication tables,
@@ -76,9 +76,28 @@ export class MagicBird {
     // 'idle': bird has finished teaching and stands perfectly still waiting for the boss.
     // No movement update needed — position stays wherever it last was.
 
+    // 'scared': bird spotted the boss and is frozen in terror — shiver + rapid glow flicker.
+    if (this.state === 'scared') {
+      this.glowIntensity = 0.35 + 0.65 * Math.abs(Math.sin(this.glowTimer / 110));
+    }
+
     if (this.state === 'captured') {
       this.position.x += (this.capturedByX - 30 - this.position.x) * 0.18;
       this.position.y += (this.capturedByY - 24 - this.position.y) * 0.18;
+    }
+
+    if (this.state === 'rescued') {
+      // Fly fast toward the target (player position, set externally each frame)
+      const dx   = this.targetX - this.position.x;
+      const dy   = this.targetY + Math.sin(this.bobTimer / 220) * 14 - this.position.y;
+      const dist = Math.hypot(dx, dy);
+      this.bobTimer += deltaMs;
+      if (dist > 6) {
+        const spd = 180 + Math.min(dist, 120);
+        this.position.x += (dx / dist) * spd * dt;
+        this.position.y += (dy / dist) * spd * dt;
+      }
+      this.glowIntensity = 0.85 + 0.15 * Math.sin(this.glowTimer / 220);
     }
 
     return false;
@@ -96,13 +115,13 @@ export class MagicBird {
       ctx.scale(-1, 1);
     }
 
-    // Tremble when scared (captured state)
-    if (this.state === 'captured') {
+    // Tremble when scared (captured or scared state)
+    if (this.state === 'captured' || this.state === 'scared') {
       ctx.translate(Math.sin(this.wingTimer / 28) * 2.5, 0);
     }
 
     // Outer halo
-    const haloR = this.state === 'teaching' ? 50 : 38;
+    const haloR = this.state === 'rescued' ? 68 : this.state === 'teaching' ? 50 : 38;
     const halo = ctx.createRadialGradient(cx, cy, 4, cx, cy, haloR);
     halo.addColorStop(0,    `rgba(120,255,210,${0.50 * this.glowIntensity})`);
     halo.addColorStop(0.55, `rgba(80,200,255,${0.22 * this.glowIntensity})`);
@@ -111,6 +130,17 @@ export class MagicBird {
     ctx.beginPath();
     ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
     ctx.fill();
+
+    // Extra celebratory glow when rescued
+    if (this.state === 'rescued') {
+      const rg = ctx.createRadialGradient(cx, cy, 4, cx, cy, 75);
+      rg.addColorStop(0, `rgba(255,220,80,${0.60 * this.glowIntensity})`);
+      rg.addColorStop(1, 'rgba(255,240,80,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 75, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     ctx.shadowColor = `rgba(80,255,190,${0.7 * this.glowIntensity})`;
     ctx.shadowBlur  = 14;
@@ -148,7 +178,7 @@ export class MagicBird {
     ctx.fill();
 
     ctx.shadowBlur = 0;
-    if (this.state === 'captured') {
+    if (this.state === 'captured' || this.state === 'scared') {
       // ── Scared wide eyes ──────────────────────────────────────────
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
@@ -193,7 +223,7 @@ export class MagicBird {
     }
 
     // Beak
-    if (this.state === 'captured') {
+    if (this.state === 'captured' || this.state === 'scared') {
       // Open beak – screaming in fright
       ctx.fillStyle = '#ffcc33';
       ctx.beginPath();
@@ -214,6 +244,15 @@ export class MagicBird {
       ctx.fillStyle = '#bb3333';
       ctx.beginPath();
       ctx.ellipse(cx + 22, cy + 0.5, 2, 1.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (this.state === 'rescued') {
+      // Upturned happy beak
+      ctx.fillStyle = '#ffcc33';
+      ctx.beginPath();
+      ctx.moveTo(cx + 19, cy - 7);
+      ctx.lineTo(cx + 27, cy - 5);
+      ctx.lineTo(cx + 21, cy - 2);
+      ctx.closePath();
       ctx.fill();
     } else {
       // Closed beak

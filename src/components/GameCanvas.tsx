@@ -12,6 +12,15 @@ import { MagicBird } from '../entities/MagicBird';
 import { BirdLessonSystem } from '../systems/BirdLessonSystem';
 import { DialogueBubble } from '../ui/DialogueBubble';
 import { BirdKidnappedScene } from '../scenes/BirdKidnappedScene';
+import { BossEvolutionSystem } from '../systems/BossEvolutionSystem';
+import { BossBattleSystem }    from '../systems/BossBattleSystem';
+import { BirdRescueScene }     from '../scenes/BirdRescueScene';
+import { BossMonster }         from '../entities/BossMonster';
+import { BirdCage }            from '../entities/BirdCage';
+import { HealthSystem }        from '../systems/HealthSystem';
+import { CheckpointSystem }    from '../systems/CheckpointSystem';
+import { HealingItem }         from '../entities/HealingItem';
+import { Victory }             from './Victory';
 import { AnswerProjectile } from '../entities/AnswerProjectile';
 import { MathSystem } from '../systems/MathSystem';
 import { ScoreSystem } from '../systems/ScoreSystem';
@@ -49,7 +58,8 @@ export function GameCanvas() {
 
   // ── React UI state ──
   const [phase, setPhase]               = useState<GamePhase>('playing');
-  const [lives, setLives]               = useState(3);
+  const [hp, setHp]                     = useState(100);
+  const [maxHp] = useState(100);
   const [score, setScore]               = useState(0);
   const [level, setLevel]               = useState(1);
   const [highScore, setHighScore]       = useState(0);
@@ -60,17 +70,22 @@ export function GameCanvas() {
   const [currentEquation, setCurrentEquation] = useState<string | undefined>(undefined);
   const [soundMuted, setSoundMuted]     = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
+  const [tablesCompleted, setTablesCompleted] = useState(0);
 
   // ── Mutable game refs (bypasses React re-render cycle) ──
   const phaseRef             = useRef<GamePhase>('playing');
   const inputRef             = useRef<InputManager | null>(null);
   const forestRef            = useRef<ForestScene | null>(null);
   const playerRef            = useRef<Player | null>(null);
+  const healthRef            = useRef<HealthSystem | null>(null);
+  const checkpointRef        = useRef<CheckpointSystem | null>(null);
+  const healingItemsRef      = useRef<HealingItem[]>([]);
   const monstersRef          = useRef<Monster[]>([]);
   const birdRef              = useRef<MagicBird | null>(null);
   const birdLessonRef        = useRef<BirdLessonSystem | null>(null);
   const birdKidnapRef        = useRef<BirdKidnappedScene | null>(null);
-  const gameModeRef          = useRef<'playing' | 'bird_intro' | 'bird_lesson' | 'bird_kidnapped'>('playing');
+  const gameModeRef          = useRef<'playing' | 'bird_intro' | 'bird_lesson' | 'bird_kidnapped' | 'stage_boss_battle' | 'bird_rescue'>('playing');
   const projectilesRef       = useRef<AnswerProjectile[]>([]);
   const mathRef              = useRef<MathSystem | null>(null);
   const scoreRef             = useRef<ScoreSystem | null>(null);
@@ -89,6 +104,10 @@ export function GameCanvas() {
   const gameTimeRef          = useRef(0);
   const prevHammerStateRef   = useRef<HammerState>('normal');
   const quizRef              = useRef<QuizModeSystem | null>(null);
+  const bossEvolutionRef     = useRef<BossEvolutionSystem | null>(null);
+  const birdRescueSceneRef   = useRef<BirdRescueScene | null>(null);
+  const birdCageRef          = useRef<BirdCage | null>(null);
+  const bossBattleRef        = useRef<BossBattleSystem | null>(null);
 
   const syncPhase = useCallback((p: GamePhase) => {
     phaseRef.current = p;
@@ -102,15 +121,17 @@ export function GameCanvas() {
     const combSys    = comboRef.current;
     const difficulty = difficultyRef.current;
     const hammer     = hammerRef.current;
-    if (!player || !sys || !combSys || !difficulty || !hammer) return;
+    const health     = healthRef.current;
+    if (!player || !sys || !combSys || !difficulty || !hammer || !health) return;
 
     sys.reset();
     combSys.reset();
     difficulty.reset();
     hammer.reset();
+    health.reset();
 
     setScore(0);
-    setLives(3);
+    setHp(100);
     setLevel(1);
     setCombo(0);
     setHammerState('normal');
@@ -131,6 +152,10 @@ export function GameCanvas() {
     spawnTimerRef.current = 0;
     gameTimeRef.current   = 0;
     quizRef.current?.reset();
+    bossEvolutionRef.current?.reset();
+    birdCageRef.current   = null;
+    bossBattleRef.current?.reset();
+    setTablesCompleted(0);
 
     if (tableProgressionRef.current?.hasCheckpoint()) {
       tableProgressionRef.current.restoreCheckpoint();
@@ -156,17 +181,31 @@ export function GameCanvas() {
     ctx.imageSmoothingEnabled = false;
 
     const onResize = () => {
+      const dpr = window.devicePixelRatio || 1;
       const s = Math.min(window.innerWidth / GAME_W, window.innerHeight / GAME_H);
       canvas.style.width  = `${GAME_W * s}px`;
       canvas.style.height = `${GAME_H * s}px`;
+      // Apply device pixel ratio for crisp rendering on high-DPI screens
+      canvas.width = GAME_W * dpr;
+      canvas.height = GAME_H * dpr;
+      ctx.scale(dpr, dpr);
+      ctx.imageSmoothingEnabled = false;
     };
     onResize();
     window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    
+    // Handle fullscreen changes
+    const handleFullscreenChange = () => {
+      setTimeout(onResize, 100);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
 
     // ── Systems ──
     const input      = new InputManager();
     const forest     = new ForestScene();
     const player     = new Player(120, GROUND_Y - 48);
+    player.setGameBounds(GAME_W, GROUND_Y); // Clamp player to screen bounds
     const math       = new MathSystem();
     const sys        = new ScoreSystem();
     const combSys    = new ComboSystem();
@@ -183,10 +222,20 @@ export function GameCanvas() {
     const birdLesson    = new BirdLessonSystem();
     const birdKidnap    = new BirdKidnappedScene();
     const dialogueBubble = new DialogueBubble();
+    const bossEvo    = new BossEvolutionSystem();
+    const birdRescue = new BirdRescueScene();
+    const bossBattle = new BossBattleSystem();
+    const health     = new HealthSystem();
+    const checkpoint = new CheckpointSystem();
 
-    quizRef.current       = quiz;
-    birdLessonRef.current = birdLesson;
-    birdKidnapRef.current = birdKidnap;
+    quizRef.current             = quiz;
+    birdLessonRef.current       = birdLesson;
+    birdKidnapRef.current       = birdKidnap;
+    bossEvolutionRef.current    = bossEvo;
+    birdRescueSceneRef.current  = birdRescue;
+    bossBattleRef.current       = bossBattle;
+    healthRef.current           = health;
+    checkpointRef.current       = checkpoint;
 
     inputRef.current            = input;
     forestRef.current           = forest;
@@ -209,13 +258,17 @@ export function GameCanvas() {
 
     const loop = new GameLoop();
     loop.start((delta) => {
-      if (phaseRef.current === 'gameover') return;
+      if (phaseRef.current === 'gameover' || phaseRef.current === 'victory') return;
 
       // ══════════════════════════════════════════════════════════════════════
       // INPUT
       // ══════════════════════════════════════════════════════════════════════
 
       const quizInProgress = quiz.isActive();
+      const isActiveCombat  = (
+        gameModeRef.current === 'playing' ||
+        gameModeRef.current === 'stage_boss_battle'
+      );
 
       // ── Quiz answer input (overrides all normal controls) ─────────────────
       if (quizInProgress && !quiz.getQuiz()?.answered) {
@@ -263,6 +316,9 @@ export function GameCanvas() {
                 new FloatingText(GAME_W / 2, 115, `COMBO x${c}!`, 'combo', 900),
               );
             }
+            if (gameModeRef.current === 'stage_boss_battle') {
+              bossBattle.onQuestionAnswered(true);
+            }
 
           } else if (result === 'wrong') {
             combSys.miss();
@@ -270,17 +326,20 @@ export function GameCanvas() {
             difficulty.onWrong();
             const eq = quiz.getQuiz()!.equation;
             memory.recordWrong(eq.a, eq.b);
-            sys.loseLife();
-            setLives(sys.lives);
+            health.takeDamage(10);
+            setHp(health.getHp());
             player.hurt();
             vfx.shake(7, 320);
             sound.play('wrong_answer');
             sound.play('player_damage');
             particles.burst(pCXq, pCYq, 'explosion', 12);
             floatingTextsRef.current.push(
-              new FloatingText(pCXq, pCYq - 60, '✗', 'wrong', 800),
+              new FloatingText(pCXq, pCYq - 60, 'Perdeu 10 HP', 'wrong', 800),
             );
-            if (sys.isGameOver()) {
+            if (gameModeRef.current === 'stage_boss_battle') {
+              bossBattle.onQuestionAnswered(false);
+            }
+            if (health.isDead()) {
               sound.play('game_over');
               setHighScore(sys.getHighScore());
               tableProgressionRef.current?.saveCheckpoint();
@@ -292,7 +351,7 @@ export function GameCanvas() {
       }
 
       // ── Normal controls (blocked during quiz or bird mode) ─────────────────────────────
-      if (!quizInProgress && gameModeRef.current === 'playing') {
+      if (!quizInProgress && isActiveCombat) {
         if (input.isDown('ArrowRight')) {
           player.velocity.x = player.MOVE_SPEED;
           player.facingRight = true;
@@ -308,7 +367,7 @@ export function GameCanvas() {
         if (input.wasPressed('ArrowUp')) player.jump();
       }
 
-      if (!quizInProgress && input.wasPressed('Space') && gameModeRef.current === 'playing') {
+      if (!quizInProgress && input.wasPressed('Space') && isActiveCombat) {
         player.attack();
 
         const pCX = player.position.x + player.size.width  / 2;
@@ -371,6 +430,12 @@ export function GameCanvas() {
               );
             }
 
+            if (gameModeRef.current === 'stage_boss_battle') {
+              bossBattle.onQuestionAnswered(true);
+              const boss = monstersRef.current.find(m => m instanceof BossMonster);
+              if (boss && !boss.isDead()) quiz.clearTrigger(boss.id);
+            }
+
             for (const p of projectilesRef.current) {
               if (p.active && p.equationId === proj.equationId) p.active = false;
             }
@@ -390,8 +455,8 @@ export function GameCanvas() {
             const [aP, bP] = proj.equationId.split('x').map(Number);
             if (!isNaN(aP) && !isNaN(bP)) memory.recordWrong(aP, bP);
 
-            sys.loseLife();
-            setLives(sys.lives);
+            health.takeDamage(10);
+            setHp(health.getHp());
             player.hurt();
             vfx.shake(7, 320);
 
@@ -402,6 +467,12 @@ export function GameCanvas() {
             floatingTextsRef.current.push(
               new FloatingText(proj.x, proj.y - 30, '✗', 'wrong', 800),
             );
+
+            if (gameModeRef.current === 'stage_boss_battle') {
+              bossBattle.onQuestionAnswered(false);
+              const boss = monstersRef.current.find(m => m instanceof BossMonster);
+              if (boss && !boss.isDead()) quiz.clearTrigger(boss.id);
+            }
 
             const correctProj = projectilesRef.current.find(
               (p) => p.equationId === proj.equationId && p.isCorrect,
@@ -433,7 +504,53 @@ export function GameCanvas() {
               Math.abs(m.position.x + m.size.width / 2 - pCX) < 120,
           );
           if (nearMon) {
-            if (hammer.isCharged()) {
+            if (nearMon instanceof BossMonster) {
+              // ── Boss: special damage rules ──────────────────────────────
+              const dmg = bossBattle.getDamageForHammer(hammer.state);
+              if (dmg > 0) {
+                nearMon.takeDamage(dmg);
+                hammer.consume();
+                setHammerState(hammer.state);
+                setHammerEnergy(hammer.getEnergyFraction());
+
+                const mCX = nearMon.position.x + nearMon.size.width / 2;
+                sound.play('monster_hit');
+                vfx.shake(8, 350);
+                particles.burst(mCX, nearMon.position.y, 'explosion', 18);
+                particles.burst(mCX, nearMon.position.y, 'star', 10);
+
+                if (nearMon.isDying()) {
+                  const pts = 150 * sys.level;
+                  sys.addScore(pts);
+                  setScore(sys.score);
+                  setLevel(sys.level);
+                  math.setMaxFactor(2 + sys.level);
+                  coinSys.spawnCoins(mCX, nearMon.position.y, 8);
+                  // Occasional healing item (15% chance)
+                  if (Math.random() < 0.15) {
+                    const types: Array<'heart' | 'star' | 'feather'> = ['heart', 'star', 'feather'];
+                    const healingItem = new HealingItem(
+                      mCX + (Math.random() - 0.5) * 20,
+                      nearMon.position.y - 20,
+                      types[Math.floor(Math.random() * types.length)],
+                    );
+                    healingItemsRef.current.push(healingItem);
+                  }
+                  sound.play('monster_defeated');
+                  floatingTextsRef.current.push(
+                    new FloatingText(mCX, nearMon.position.y - 40, `+${pts}`, 'score', 1400),
+                  );
+                  particles.burst(mCX, nearMon.position.y, 'explosion', 30);
+                }
+              } else {
+                // Normal hammer — boss is immune, show hint
+                floatingTextsRef.current.push(
+                  new FloatingText(pCX, pCY - 60, 'Responda as perguntas!', 'message', 1600),
+                );
+                sound.play('wrong_answer');
+              }
+            } else if (hammer.isCharged()) {
+              // ── Normal monster: original charged-hammer logic ────────────
               nearMon.hit();
               hammer.consume();
               setHammerState(hammer.state);
@@ -452,6 +569,16 @@ export function GameCanvas() {
                 setLevel(sys.level);
                 math.setMaxFactor(2 + sys.level);
                 coinSys.spawnCoins(mCX, nearMon.position.y, nearMon.isBoss ? 6 : 3);
+                // Occasional healing item (15% chance)
+                if (Math.random() < 0.15) {
+                  const types: Array<'heart' | 'star' | 'feather'> = ['heart', 'star', 'feather'];
+                  const healingItem = new HealingItem(
+                    mCX + (Math.random() - 0.5) * 20,
+                    nearMon.position.y - 20,
+                    types[Math.floor(Math.random() * types.length)],
+                  );
+                  healingItemsRef.current.push(healingItem);
+                }
                 sound.play('monster_defeated');
                 floatingTextsRef.current.push(
                   new FloatingText(mCX, nearMon.position.y - 40, `+${pts}`, 'score', 1400),
@@ -460,14 +587,14 @@ export function GameCanvas() {
               }
             } else {
               player.hurt();
-              sys.loseLife();
-              setLives(sys.lives);
+              health.takeDamage(15);
+              setHp(health.getHp());
               vfx.shake(5, 200);
               sound.play('player_damage');
               floatingTextsRef.current.push(
                 new FloatingText(pCX, pCY - 60, 'Carregue o martelo!', 'message', 1800),
               );
-              if (sys.isGameOver()) {
+              if (health.isDead()) {
                 sound.play('game_over');
                 setHighScore(sys.getHighScore());
                 tableProgressionRef.current?.saveCheckpoint();
@@ -493,6 +620,9 @@ export function GameCanvas() {
       combSys.update(delta);
       hammer.update(delta);
       player.update(delta, GROUND_Y);
+      health.update(delta);
+      // Keep player within canvas bounds
+      player.position.x = Math.max(0, Math.min(player.position.x, GAME_W - player.size.width));
 
       if (hammer.state !== prevHammerStateRef.current) {
         prevHammerStateRef.current = hammer.state;
@@ -501,11 +631,13 @@ export function GameCanvas() {
       setHammerEnergy(hammer.getEnergyFraction());
 
       // ── Quiz zone trigger ─────────────────────────────────────────────────
-      if (!quiz.isActive() && gameModeRef.current === 'playing') {
+      if (!quiz.isActive() && isActiveCombat) {
         const pCXquiz = player.position.x + player.size.width / 2;
         for (const m of monstersRef.current) {
           if (m.isDead() || m.isDying() || !m.operation) continue;
           if (quiz.hasTriggered(m.id)) continue;
+          // Boss battles: only ask if the cooldown has expired
+          if (m instanceof BossMonster && !bossBattle.canAskQuestion()) continue;
           const dist = m.position.x - pCXquiz;
           if (dist > 0 && dist < quiz.QUIZ_ZONE) {
             quiz.startQuiz(m.id, m.operation.a, m.operation.b, math, sys.level);
@@ -515,7 +647,12 @@ export function GameCanvas() {
           }
         }
       }
-      quiz.update(delta);
+      const quizExited = quiz.update(delta);
+      // In boss battle: re-enable boss to ask again after the quiz closes
+      if (quizExited === 'exited' && gameModeRef.current === 'stage_boss_battle') {
+        const boss = monstersRef.current.find(m => m instanceof BossMonster);
+        if (boss && !boss.isDead()) quiz.clearTrigger(boss.id);
+      }
 
       // ── Spawn (only during normal play) ───────────────────────────────────
       if (gameModeRef.current === 'playing') {
@@ -540,6 +677,51 @@ export function GameCanvas() {
             gameModeRef.current = 'bird_intro';
             sound.play('magic_bird_appear');
             particles.burst(GAME_W / 2, GROUND_Y - 80, 'spark', 16);
+
+          } else if (tableProg.isReadyForBoss()) {
+            // ── Stage boss battle ──────────────────────────────────────────
+            monstersRef.current    = [];
+            projectilesRef.current = [];
+            quiz.reset();
+            bossBattle.reset();
+
+            const bossLevel = bossEvo.getLevel();
+            const table     = tableProg.getCurrentTable() || 5;
+            const tableOps  = tableProg.getTableOps();
+            const opSlice   =
+              tableOps.length > 0
+                ? tableOps.slice(0, bossEvo.getOpCount()).map(o => ({ a: o.a, b: o.b }))
+                : [{ a: table, b: 5 }];
+
+            // HP scales with boss level: 200 at level 0, +100 per level
+            const bossHp  = 200 + bossLevel * 100;
+            const bossH   = Math.round(80 * (1 + bossLevel * 0.15));
+            const boss    = new BossMonster(
+              GAME_W + 60, GROUND_Y - bossH,
+              monsterIdRef.current++,
+              bossHp, opSlice, bossLevel,
+            );
+            boss.velocity.x = bossEvo.getSpeedX();
+            // Patrol bounds: left quarter → right 72% of screen
+            boss.setPatrolBounds(Math.round(GAME_W * 0.18), Math.round(GAME_W * 0.72));
+            monstersRef.current.push(boss);
+
+            // Captive bird in cage beside the boss
+            const captiveBird = new MagicBird(GAME_W + 80, GROUND_Y - bossH - 65);
+            captiveBird.state      = 'captured';
+            captiveBird.facingLeft = true;
+            birdRef.current        = captiveBird;
+            birdCageRef.current    = new BirdCage();
+
+            tableProg.onBossPhaseStarted();
+            gameModeRef.current = 'stage_boss_battle';
+            sound.play('boss_appear');
+            vfx.shake(8, 500);
+            particles.burst(GAME_W / 2, GROUND_Y - 100, 'explosion', 22);
+            floatingTextsRef.current.push(
+              new FloatingText(GAME_W / 2, GAME_H * 0.30, '⚔️  Derrote o Boss!', 'message', 3000),
+              new FloatingText(GAME_W / 2, GAME_H * 0.42, 'Responda as perguntas e carregue o martelo!', 'message', 4000),
+            );
 
           } else {
             const rnd = Math.random();
@@ -604,33 +786,53 @@ export function GameCanvas() {
             // Bird stands still — captured state is set later when the boss actually grabs it
             bird.state = 'idle';
             gameModeRef.current = 'bird_kidnapped';
-            birdKidnap.start(GAME_W, GROUND_Y);
+            birdKidnap.start(
+              GAME_W, GROUND_Y,
+              bird.position.x + bird.size.width / 2,
+              bird.position.y,
+            );
             sound.play('lesson_complete');
           }
         }
       }
 
       if (gameModeRef.current === 'bird_kidnapped') {
-        const bird       = birdRef.current;
-        const prevStage  = birdKidnap.getStage();
+        const bird      = birdRef.current;
+        const prevStage = birdKidnap.getStage();
         birdKidnap.update(delta);
-        const newStage   = birdKidnap.getStage();
+        const newStage  = birdKidnap.getStage();
 
-        // Fire sounds on stage transitions
+        // Fire sounds / visual reactions on stage transitions
         if (prevStage !== newStage) {
-          if (newStage === 'boss_enters') sound.play('boss_appear');
-          if (newStage === 'capture') {
+          if (newStage === 'entering')    { sound.play('boss_appear'); vfx.shake(6, 400); }
+          if (newStage === 'approaching') { vfx.shake(4, 280); }
+          if (newStage === 'grabbing') {
             sound.play('bird_kidnapped');
-            // Now the boss physically grabs the bird — switch to scared face
-            if (bird) bird.state = 'captured';
+            if (bird) {
+              bird.state = 'scared';   // bird reacts with fear before being grabbed
+              floatingTextsRef.current.push(
+                new FloatingText(bird.position.x, bird.position.y - 28, 'Socorro!', 'message', 1000),
+              );
+            }
           }
-          if (newStage === 'message')     sound.play('mission_start');
+          if (newStage === 'holding' && bird) bird.state = 'captured'; // boss has the bird
+          if (newStage === 'message') sound.play('mission_start');
+        }
+        
+        // Apply tremor shake while boss is holding or fleeing with the bird
+        const stage = birdKidnap.getStage();
+        if (stage === 'holding' || stage === 'escaping') {
+          const tremor = birdKidnap.getTremor();
+          vfx.shake(Math.abs(tremor) * 2, 100);
         }
 
         if (bird) {
-          const bossPos   = birdKidnap.getBossPosition();
-          bird.capturedByX = bossPos.x;
-          bird.capturedByY = bossPos.y;
+          // Once the boss is grabbing/holding/escaping, bird follows boss position
+          if (birdKidnap.isBirdGrabbed()) {
+            const bossPos    = birdKidnap.getBossPosition();
+            bird.capturedByX = bossPos.x;
+            bird.capturedByY = bossPos.y - 40;
+          }
           bird.update(delta);
         }
 
@@ -644,10 +846,100 @@ export function GameCanvas() {
         }
       }
 
+      // ── Stage boss battle: cage update + bird latch ───────────────────────
+      if (gameModeRef.current === 'stage_boss_battle') {
+        const bird = birdRef.current;
+        const boss = monstersRef.current.find((m) => m instanceof BossMonster) as BossMonster | undefined;
+        const cage = birdCageRef.current;
+
+        // Update cage break animation
+        cage?.update(delta);
+
+        // Update boss-battle quiz cooldown
+        bossBattle.update(delta);
+
+        // Detect patrol turn-around → allow new question immediately
+        if (boss?.justTurnedAround) {
+          bossBattle.onBossTurnedAround();
+        }
+
+        // Bird follows boss, offset upward (inside cage)
+        if (bird && boss && !boss.isDead() && !boss.isDying()) {
+          bird.capturedByX = boss.position.x + boss.size.width  / 2;
+          bird.capturedByY = boss.position.y - 55;
+          bird.facingLeft  = true;
+          bird.update(delta);
+        } else if (bird) {
+          bird.update(delta);
+        }
+      }
+
+      // ── Bird rescue scene ──────────────────────────────────────────────────
+      if (gameModeRef.current === 'bird_rescue') {
+        birdRescue.update(delta);
+        const bird = birdRef.current;
+        if (bird) {
+          bird.facingLeft = bird.position.x > player.position.x;
+          bird.setTarget(player.position.x + 50, player.position.y - 120);
+          bird.update(delta);
+        }
+        if (birdRescue.isDone()) {
+          birdRef.current = null;
+          tableProg.onBossDefeated();
+          bossEvo.onDefeated();
+          if (tableProg.isRandomMixPhase()) {
+            // Spawn the final mega-boss ──────────────────────────────────────
+            const learnedOps = tableProg.getAllLearnedOps();
+            const shuffled   = [...learnedOps].sort(() => Math.random() - 0.5).slice(0, 8);
+            const fbLevel    = bossEvo.getLevel();
+            const fbH        = Math.round(80 * (1 + fbLevel * 0.15));
+            const finalBossHp = 400 + fbLevel * 100;
+            const finalBoss  = new BossMonster(
+              GAME_W + 60, GROUND_Y - fbH,
+              monsterIdRef.current++,
+              finalBossHp,
+              shuffled.map(o => ({ a: o.a, b: o.b })),
+              fbLevel,
+            );
+            finalBoss.velocity.x = bossEvo.getSpeedX() - 10;
+            finalBoss.setPatrolBounds(Math.round(GAME_W * 0.12), Math.round(GAME_W * 0.76));
+            monstersRef.current    = [finalBoss];
+            projectilesRef.current = [];
+            quiz.reset();
+            bossBattle.reset();
+
+            const captiveBird2 = new MagicBird(GAME_W * 0.72 + 60, GROUND_Y - fbH - 65);
+            captiveBird2.state      = 'captured';
+            captiveBird2.facingLeft = true;
+            birdRef.current         = captiveBird2;
+            birdCageRef.current     = new BirdCage();
+
+            gameModeRef.current = 'stage_boss_battle';
+            sound.play('boss_appear');
+            vfx.shake(14, 1000);
+            particles.burst(GAME_W / 2, GROUND_Y - 120, 'explosion', 36);
+            particles.burst(GAME_W / 2, GROUND_Y - 120, 'star', 22);
+            floatingTextsRef.current.push(
+              new FloatingText(GAME_W / 2, GAME_H * 0.26, '⚔️  BATALHA FINAL!', 'message', 4000),
+            );
+          } else {
+            const nextTbl = tableProg.getCurrentTable();
+            setCurrentTable(nextTbl === 0 ? 10 : nextTbl);
+            gameModeRef.current   = 'playing';
+            spawnTimerRef.current = 0;
+          }
+        }
+      }
+
       // ── Monsters ──
       const pCXupd       = player.position.x + player.size.width / 2;
       const isQuizActive  = quiz.isActive();
-      const isBirdMode    = gameModeRef.current !== 'playing';
+      const isBirdMode    = (
+        gameModeRef.current === 'bird_intro' ||
+        gameModeRef.current === 'bird_lesson' ||
+        gameModeRef.current === 'bird_kidnapped' ||
+        gameModeRef.current === 'bird_rescue'
+      );
 
       monstersRef.current = monstersRef.current.filter((m) => {
         // Freeze all monsters while quiz or bird mode is running
@@ -655,20 +947,82 @@ export function GameCanvas() {
 
         if (m.isDead()) {
           quiz.onMonsterDead(m.id);
+
+          // ── Detect stage boss death ────────────────────────────────────
+          if (m instanceof BossMonster && gameModeRef.current === 'stage_boss_battle') {
+            // Break the cage on boss death
+            if (birdCageRef.current) {
+              const bird = birdRef.current;
+              const cCX  = bird ? bird.position.x + bird.size.width / 2 : m.position.x + m.size.width / 2;
+              const cCY  = bird ? bird.position.y + 19 : m.position.y - 36;
+              birdCageRef.current.startBreaking(cCX, cCY);
+            }
+
+            if (tableProg.isRandomMixPhase()) {
+              // Final boss defeated → Victory!
+              sound.play('victory');
+              vfx.shake(12, 1000);
+              particles.burst(GAME_W / 2, GAME_H / 2, 'explosion', 44);
+              particles.burst(GAME_W / 2, GAME_H / 2, 'star', 28);
+              particles.burst(GAME_W / 2, GAME_H / 2, 'energy', 22);
+              birdRef.current = null;
+              birdCageRef.current = null;
+              setHighScore(sys.getHighScore());
+              setTablesCompleted(bossEvo.getLevel() + 1);
+              // Save checkpoint on final boss victory
+              checkpointRef.current?.saveCheckpoint(
+                tableProg.getCurrentTable() || 0,
+                health.getHp(),
+                sys.score,
+                sys.level,
+              );
+              syncPhase('victory');
+            } else {
+              // Regular stage boss → bird rescue scene
+              const completedTable = tableProg.getCurrentTable() || 9;
+              const nextTable      = completedTable < 9 ? completedTable + 1 : 0;
+              const bird           = birdRef.current;
+              if (bird) {
+                bird.state = 'rescued';
+                bird.setTarget(player.position.x + 50, player.position.y - 120);
+              }
+              // Save checkpoint on stage boss defeat
+              checkpointRef.current?.saveCheckpoint(
+                completedTable,
+                health.getHp(),
+                sys.score,
+                sys.level,
+              );
+              birdRescue.start(completedTable, nextTable);
+              gameModeRef.current = 'bird_rescue';
+              sound.play('boss_defeated');
+              sound.play('bird_rescued');
+              vfx.shake(8, 600);
+              particles.burst(m.position.x + m.size.width / 2, m.position.y, 'explosion', 30);
+              particles.burst(m.position.x + m.size.width / 2, m.position.y, 'star', 16);
+              floatingTextsRef.current.push(
+                new FloatingText(
+                  m.position.x + m.size.width / 2, m.position.y - 50,
+                  '⚔️  BOSS DERROTADO!', 'message', 2200,
+                ),
+              );
+            }
+          }
+
           return false;
         }
 
         if (!isQuizActive && m.position.x <= -160) {
           if (m instanceof EagleMonster) {
-            sys.loseLife();
-            setLives(sys.lives);
+            health.takeDamage(30);
+            setHp(health.getHp());
             player.hurt();
             vfx.shake(5, 200);
             sound.play('player_damage');
             floatingTextsRef.current.push(
-              new FloatingText(120, GROUND_Y - 100, 'Monstro fugiu! -❤️', 'damage', 1500),
+              new FloatingText(120, GROUND_Y - 100, 'Monstro fugiu! -30 HP', 'damage', 1500),
             );
-            if (sys.isGameOver()) {
+            if (health.isDead()) {
               sound.play('game_over');
               setHighScore(sys.getHighScore());
               tableProgressionRef.current?.saveCheckpoint();
@@ -720,11 +1074,42 @@ export function GameCanvas() {
         }
       }
 
+      // ── Healing items ──
+      const pCX = player.position.x + player.size.width / 2;
+      const pCY = player.position.y + player.size.height * 0.5;
+      healingItemsRef.current = healingItemsRef.current.filter((item) => {
+        item.update(delta);
+        if (!item.isExpired() && Math.hypot(item.position.x - pCX, item.position.y - pCY) < item.COLLECT_RANGE) {
+          health.heal(item.healAmount);
+          setHp(health.getHp());
+          sound.play('coin_collect');
+          floatingTextsRef.current.push(
+            new FloatingText(item.position.x, item.position.y - 30, `+${item.healAmount} HP`, 'heal', 1200),
+          );
+          particles.burst(item.position.x, item.position.y, 'energy', 12);
+          return false; // remove item
+        }
+        return !item.isExpired();
+      });
+
       // ── Passive monster collision ──
-      if (!quiz.isActive() && !player.isInvincible() && gameModeRef.current === 'playing') {
+      if (!quiz.isActive() && !player.isInvincible() && isActiveCombat) {
         for (const m of monstersRef.current) {
           if (!m.isDying() && rectsOverlap(player.getBounds(), m.getBounds())) {
-            if (hammer.isCharged()) {
+            if (m instanceof BossMonster) {
+              // Boss collision: always hurts player, boss is immune to contact
+              health.takeDamage(20);
+              setHp(health.getHp());
+              player.hurt();
+              vfx.shake(8, 320);
+              sound.play('player_damage');
+              if (health.isDead()) {
+                sound.play('game_over');
+                setHighScore(sys.getHighScore());
+                tableProgressionRef.current?.saveCheckpoint();
+                syncPhase('gameover');
+              }
+            } else if (hammer.isCharged()) {
               m.hit();
               hammer.consume();
               setHammerState(hammer.state);
@@ -740,12 +1125,12 @@ export function GameCanvas() {
                 sound.play('monster_defeated');
               }
             } else {
-              sys.loseLife();
-              setLives(sys.lives);
+              health.takeDamage(15);
+              setHp(health.getHp());
               player.hurt();
               vfx.shake(6, 260);
               sound.play('player_damage');
-              if (sys.isGameOver()) {
+              if (health.isDead()) {
                 sound.play('game_over');
                 setHighScore(sys.getHighScore());
                 tableProgressionRef.current?.saveCheckpoint();
@@ -767,6 +1152,10 @@ export function GameCanvas() {
       if (gameModeRef.current === 'bird_lesson' || gameModeRef.current === 'bird_intro') {
         const eq = birdLesson.getCurrentEquation();
         setCurrentEquation(eq ? `${eq.a} × ${eq.b} = ${eq.result}` : undefined);
+      } else if (gameModeRef.current === 'stage_boss_battle') {
+        const boss = monstersRef.current.find((m) => m instanceof BossMonster) as BossMonster | undefined;
+        const op   = boss?.operation;
+        setCurrentEquation(op ? `BOSS: ${op.a} × ${op.b}` : undefined);
       } else {
         const sortedMonsters = monstersRef.current
           .filter((m) => !m.isDying() && !m.isDead() && m.operation)
@@ -819,15 +1208,26 @@ export function GameCanvas() {
         }
       }
 
+      // Healing items
+      for (const item of healingItemsRef.current) {
+        item.draw(ctx);
+      }
+
       player.draw(ctx);
 
       // Hammer glow
       if (hammer.isCharged()) {
         const hx = player.position.x + player.size.width  / 2;
         const hy = player.position.y + player.size.height * 0.35;
-        const r  = hammer.state === 'supercharged' ? 56 : 40;
+        const r  = hammer.state === 'giant' ? 80 : hammer.state === 'supercharged' ? 56 : 40;
         const glow = ctx.createRadialGradient(hx, hy, 0, hx, hy, r);
-        glow.addColorStop(0, hammer.state === 'supercharged' ? 'rgba(255,110,0,0.65)' : 'rgba(255,220,0,0.55)');
+        glow.addColorStop(0,
+          hammer.state === 'giant'
+            ? 'rgba(255,255,0,0.90)'
+            : hammer.state === 'supercharged'
+            ? 'rgba(255,110,0,0.65)'
+            : 'rgba(255,220,0,0.55)',
+        );
         glow.addColorStop(1, 'rgba(255,200,0,0)');
         ctx.fillStyle = glow;
         ctx.beginPath();
@@ -846,10 +1246,27 @@ export function GameCanvas() {
         birdKidnap.draw(ctx, GAME_W, GAME_H);
       }
 
+      // ── Bird rescue overlay ───────────────────────────────────────────────
+      if (gameModeRef.current === 'bird_rescue') {
+        birdRescue.draw(ctx, GAME_W, GAME_H);
+      }
+
       // ── Magic bird (drawn on top so it’s visible over darkness) ─────────────
       const currentBird = birdRef.current;
       if (currentBird) {
         currentBird.draw(ctx);
+      }
+
+      // ── Cage (drawn over bird so bars appear in front — imprisoned look) ──────
+      if (
+        birdCageRef.current && currentBird &&
+        (gameModeRef.current === 'stage_boss_battle' || birdCageRef.current.isBreaking())
+      ) {
+        birdCageRef.current.draw(
+          ctx,
+          currentBird.position.x + currentBird.size.width  / 2,
+          currentBird.position.y,
+        );
       }
 
       // ── Dialogue bubble during lesson ───────────────────────────────────
@@ -875,6 +1292,8 @@ export function GameCanvas() {
       input.destroy();
       sound.destroy();
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, [syncPhase]);
 
@@ -885,9 +1304,22 @@ export function GameCanvas() {
     return () => window.removeEventListener('fullscreenchange', h);
   }, []);
 
+  // ─── Mobile orientation ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const handleOrientationChange = () => {
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
+    window.addEventListener('orientationchange', handleOrientationChange);
+    window.addEventListener('resize', handleOrientationChange);
+    return () => {
+      window.removeEventListener('orientationchange', handleOrientationChange);
+      window.removeEventListener('resize', handleOrientationChange);
+    };
+  }, []);
+
   const toggleFullscreen = async () => {
     try {
-      if (!document.fullscreenElement) await wrapRef.current?.requestFullscreen();
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
       else                             await document.exitFullscreen();
     } catch { /* ignore */ }
   };
@@ -902,8 +1334,19 @@ export function GameCanvas() {
     <div ref={wrapRef} className="game-wrap" style={{ touchAction: 'none' }}>
       <canvas ref={canvasRef} className="game-canvas" />
 
+      {/* Mobile orientation warning */}
+      {isPortrait && (
+        <div className="orientation-warning">
+          <div className="orientation-warning-content">
+            <p>Vire o celular</p>
+            <p>para jogar melhor</p>
+          </div>
+        </div>
+      )}
+
       <HUD
-        lives={lives}
+        hp={hp}
+        maxHp={maxHp}
         score={score}
         level={level}
         highScore={highScore}
@@ -918,6 +1361,15 @@ export function GameCanvas() {
 
       {phase === 'gameover' && (
         <GameOver score={score} highScore={highScore} onRestart={handleRestart} />
+      )}
+
+      {phase === 'victory' && (
+        <Victory
+          score={score}
+          highScore={highScore}
+          tablesCompleted={tablesCompleted}
+          onRestart={handleRestart}
+        />
       )}
 
       <MobileControls

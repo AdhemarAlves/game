@@ -12,7 +12,7 @@ export interface Rect {
 }
 
 // ─── Game State ───────────────────────────────────────────────────────────────
-export type GamePhase = 'playing' | 'gameover';
+export type GamePhase = 'playing' | 'gameover' | 'victory';
 export type GameMode = 'normal' | 'mini-boss' | 'boss';
 
 // ─── Math System ──────────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ export interface MathEquation {
 }
 
 // ─── Hammer System ────────────────────────────────────────────────────────────
-export type HammerState = 'normal' | 'charged' | 'supercharged';
+export type HammerState = 'normal' | 'charged' | 'supercharged' | 'giant';
 export type VisualAssistLevel = 'clear' | 'subtle' | 'none';
 
 // ─── Persistence (prepared for Supabase) ──────────────────────────────────────

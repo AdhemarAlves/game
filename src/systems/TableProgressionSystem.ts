@@ -23,6 +23,7 @@ export class TableProgressionSystem {
   private allLearnedOps: TableOp[] = [];
   private currentTableOps: TableOp[] = []; // all ops shown for current table
   private randomMixPhase = false;
+  private readyForBoss   = false;     // true after enough monsters → boss should spawn
 
   // ─── Sub-phase query ──────────────────────────────────────────────────────
 
@@ -78,18 +79,38 @@ export class TableProgressionSystem {
     if (this.randomMixPhase || this.subPhase !== 'monsters') return;
     this.monstersSpawned++;
     if (this.monstersSpawned >= this.MONSTERS_PER_TABLE) {
-      if (this.currentTable < 9) {
-        this.currentTable++;
-        this.currentItem = 1;
-        this.subPhase = 'artifacts';
-        this.monstersSpawned = 0;
-        this.currentTableOps = [];
-      } else {
-        // All 9 tables done — enter random-mix phase
-        this.randomMixPhase = true;
-      }
+      // Signal that the stage boss should now spawn (caller handles advancement)
+      this.readyForBoss = true;
     }
   }
+
+  // ─── Boss phase ───────────────────────────────────────────────────────────
+
+  /** True when enough monsters have been defeated and the stage boss should spawn. */
+  isReadyForBoss(): boolean { return this.readyForBoss && !this.randomMixPhase; }
+
+  /** Call when the stage boss battle begins. */
+  onBossPhaseStarted(): void { this.readyForBoss = false; }
+
+  /** Call when the stage boss is defeated. Advances to the next table (or mix phase). */
+  onBossDefeated(): void {
+    if (this.randomMixPhase) return; // final battle has its own victory
+    if (this.currentTable < 9) {
+      this.currentTable++;
+      this.currentItem     = 1;
+      this.subPhase        = 'artifacts';
+      this.monstersSpawned = 0;
+      this.currentTableOps = [];
+    } else {
+      this.randomMixPhase = true; // → all tables done, triggers final boss
+    }
+  }
+
+  /** All ops taught for the current table (used to build boss quiz operations). */
+  getTableOps(): TableOp[] { return [...this.currentTableOps]; }
+
+  /** Every op taught across all tables (used for final boss). */
+  getAllLearnedOps(): TableOp[] { return [...this.allLearnedOps]; }
 
   // ─── Queries ─────────────────────────────────────────────────────────────
 
@@ -172,12 +193,13 @@ export class TableProgressionSystem {
   // ─── Reset ───────────────────────────────────────────────────────────────
 
   reset(): void {
-    this.currentTable = 1;
-    this.currentItem = 1;
-    this.subPhase = 'artifacts';
+    this.currentTable    = 1;
+    this.currentItem     = 1;
+    this.subPhase        = 'artifacts';
     this.monstersSpawned = 0;
-    this.allLearnedOps = [];
+    this.allLearnedOps   = [];
     this.currentTableOps = [];
-    this.randomMixPhase = false;
+    this.randomMixPhase  = false;
+    this.readyForBoss    = false;
   }
 }

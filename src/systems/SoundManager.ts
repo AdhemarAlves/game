@@ -23,7 +23,11 @@ export type SoundEvent =
   | 'lesson_complete'
   | 'boss_appear'
   | 'bird_kidnapped'
-  | 'mission_start';
+  | 'mission_start'
+  // Stage boss / rescue / victory events
+  | 'boss_defeated'
+  | 'bird_rescued'
+  | 'victory';
 
 export class SoundManager {
   private ctx: AudioContext | null = null;
@@ -107,6 +111,10 @@ export class SoundManager {
         case 'boss_appear':        this.sweep(440, 80, 0.18, 'sawtooth', 0.85); break;
         case 'bird_kidnapped':     this.tone(220, 0.20, 'sawtooth', 0.12, 0, 110, 0.28); break;
         case 'mission_start':      this.arpeggio([440, 523, 659, 784], 0.14, 'triangle', 0.10); break;
+        // Boss / rescue / victory
+        case 'boss_defeated':      this.arpeggio([523, 659, 784, 1047, 1319, 1568], 0.15, 'triangle', 0.09); break;
+        case 'bird_rescued':       this.arpeggio([880, 1047, 1319, 1568, 2093], 0.13, 'sine', 0.08); break;
+        case 'victory':            this.arpeggio([523, 659, 784, 1047, 1319, 1568, 2093], 0.16, 'triangle', 0.10); break;
       }
     } catch { /* ignore individual sound errors */ }
   }

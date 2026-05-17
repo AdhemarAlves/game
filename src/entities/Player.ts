@@ -15,6 +15,14 @@ export class Player {
   facingRight = true;
   isOnGround = false;
 
+  // ── Health system ──
+  readonly maxHp = 100;
+  hp = 100;
+
+  // ── Game bounds (set by GameCanvas) ──
+  private maxX = 960;
+  private maxY = 540;
+
   private animTimer = 0;
   private animFrame = 0;
   private hurtTimer = 0;
@@ -27,6 +35,15 @@ export class Player {
 
   constructor(x: number, y: number) {
     this.position = { x, y };
+  }
+
+  /**
+   * Set the game boundaries to clamp the player within the visible area.
+   * Called by GameCanvas with the actual canvas dimensions.
+   */
+  setGameBounds(maxX: number, maxY: number): void {
+    this.maxX = maxX;
+    this.maxY = maxY;
   }
 
   update(deltaMs: number, groundY: number): void {
@@ -55,6 +72,16 @@ export class Player {
 
     // Clamp left boundary
     if (this.position.x < 0) this.position.x = 0;
+    
+    // Clamp right boundary
+    const maxRight = this.maxX - this.size.width;
+    if (this.position.x > maxRight) this.position.x = maxRight;
+    
+    // Clamp vertical boundaries
+    const minY = 0;
+    const maxBottom = this.maxY - this.size.height;
+    if (this.position.y < minY) this.position.y = minY;
+    if (this.position.y > maxBottom) this.position.y = maxBottom;
 
     // Timers
     if (this.hurtTimer > 0) {
