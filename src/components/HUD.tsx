@@ -27,8 +27,8 @@ export function HUD({
   soundMuted,
   onToggleSound,
 }: HUDProps) {
-  const tableLabel =
-    currentTable === 10 ? 'Mix Total' : `Tabuada do ${currentTable}`;
+  const livesFrac      = lives / 3;
+  const livesBarColor  = livesFrac > 0.66 ? '#44ee44' : livesFrac > 0.33 ? '#ffcc00' : '#ee3333';
 
   const hammerColor =
     hammerState === 'supercharged'
@@ -42,20 +42,24 @@ export function HUD({
 
   return (
     <div className="hud">
-      {/* ── Left: lives ── */}
+      {/* ── Left: health bar ── */}
       <div className="hud-lives">
-        {Array.from({ length: 3 }, (_, i) => (
-          <span key={i} className={`heart${i < lives ? '' : ' empty'}`}>
-            {i < lives ? '❤️' : '🖤'}
-          </span>
-        ))}
+        <span className="hud-lives-icon">❤️</span>
+        <div className="hud-lives-bar-bg">
+          <div
+            className="hud-lives-bar-fill"
+            style={{
+              width: `${Math.round(livesFrac * 100)}%`,
+              background: livesBarColor,
+              boxShadow: livesFrac < 0.4 ? `0 0 7px ${livesBarColor}` : 'none',
+            }}
+          />
+        </div>
+        <span className="hud-lives-count">{lives}</span>
       </div>
 
-      {/* ── Center: table + hammer + equation ── */}
+      {/* ── Center: hammer + equation ── */}
       <div className="hud-center">
-        <span className="hud-table">{tableLabel}</span>
-        {combo > 1 && <span className="hud-combo">COMBO x{combo}</span>}
-
         {/* Hammer energy bar */}
         <div className="hud-hammer">
           <span

@@ -24,6 +24,9 @@ import { FloatingText } from '../effects/FloatingText';
 import { ParticleSystem } from '../effects/ParticleSystem';
 import { VisualEffects } from '../effects/VisualEffects';
 import type { GamePhase, HammerState, VisualAssistLevel } from '../types';
+import { QuizModeSystem } from '../systems/QuizModeSystem';
+import type { QuizOptionPosition } from '../systems/QuizModeSystem';
+import { QuizOverlay } from '../ui/QuizOverlay';
 
 import { HUD } from './HUD';
 import { GameOver } from './GameOver';
@@ -79,6 +82,7 @@ export function GameCanvas() {
   const monsterIdRef         = useRef(0);
   const gameTimeRef          = useRef(0);
   const prevHammerStateRef   = useRef<HammerState>('normal');
+  const quizRef              = useRef<QuizModeSystem | null>(null);
 
   const syncPhase = useCallback((p: GamePhase) => {
     phaseRef.current = p;
@@ -118,6 +122,7 @@ export function GameCanvas() {
     particlesRef.current?.clear();
     spawnTimerRef.current = 0;
     gameTimeRef.current   = 0;
+    quizRef.current?.reset();
 
     if (tableProgressionRef.current?.hasCheckpoint()) {
       tableProgressionRef.current.restoreCheckpoint();
@@ -165,6 +170,10 @@ export function GameCanvas() {
     const sound      = new SoundManager();
     const particles  = new ParticleSystem();
     const vfx        = new VisualEffects();
+    const quiz        = new QuizModeSystem();
+    const quizOverlay = new QuizOverlay();
+
+    quizRef.current = quiz;
 
     inputRef.current            = input;
     forestRef.current           = forest;
@@ -193,22 +202,100 @@ export function GameCanvas() {
       // INPUT
       // ══════════════════════════════════════════════════════════════════════
 
-      if (input.isDown('ArrowRight')) {
-        player.velocity.x = player.MOVE_SPEED;
-        player.facingRight = true;
-        if (player.isOnGround && player.state !== 'attacking') player.state = 'running';
-      } else if (input.isDown('ArrowLeft')) {
-        player.velocity.x = -player.MOVE_SPEED * 0.6;
-        player.facingRight = false;
-        if (player.isOnGround && player.state !== 'attacking') player.state = 'running';
-      } else {
+      const quizInProgress = quiz.isActive();
+
+      // ── Quiz answer input (overrides all normal controls) ─────────────────
+      if (quizInProgress && !quiz.getQuiz()?.answered) {
         player.velocity.x = 0;
         if (player.isOnGround && player.state === 'running') player.state = 'idle';
+
+        const quizDir: QuizOptionPosition | null =
+          input.wasPressed('ArrowLeft')  ? 'left'  :
+          input.wasPressed('ArrowRight') ? 'right' :
+          input.wasPressed('ArrowUp')    ? 'up'    : null;
+
+        if (quizDir) {
+          const result = quiz.selectAnswer(quizDir);
+          const pCXq   = player.position.x + player.size.width  / 2;
+          const pCYq   = player.position.y + player.size.height * 0.5;
+
+          if (result === 'correct') {
+            combSys.hit();
+            const c = combSys.getCombo();
+            setCombo(c);
+            hammer.charge(c);
+            setHammerState(hammer.state);
+            setHammerEnergy(hammer.getEnergyFraction());
+            difficulty.onCorrect();
+            const eq  = quiz.getQuiz()!.equation;
+            memory.recordOperation(eq.a, eq.b, eq.answer);
+            const pts = math.getPointsForCorrect(sys.level) * combSys.getMultiplier();
+            sys.addScore(pts);
+            setScore(sys.score);
+            setLevel(sys.level);
+            math.setMaxFactor(2 + sys.level);
+            sound.play('correct_answer');
+            if (hammer.state === 'supercharged') sound.play('hammer_supercharge');
+            else                                 sound.play('hammer_charge');
+            particles.burst(pCXq, pCYq - 20, 'energy', 14);
+            particles.burst(pCXq, pCYq - 20, 'spark',  8);
+            floatingTextsRef.current.push(
+              new FloatingText(pCXq, pCYq - 92,  `+${pts}`,      'score',   1000),
+              new FloatingText(pCXq, pCYq - 124, '✓ Correto!',  'correct', 1200),
+            );
+            if (c > 1) {
+              sound.play('combo');
+              vfx.shake(6, 250);
+              floatingTextsRef.current.push(
+                new FloatingText(GAME_W / 2, 115, `COMBO x${c}!`, 'combo', 900),
+              );
+            }
+
+          } else if (result === 'wrong') {
+            combSys.miss();
+            setCombo(0);
+            difficulty.onWrong();
+            const eq = quiz.getQuiz()!.equation;
+            memory.recordWrong(eq.a, eq.b);
+            sys.loseLife();
+            setLives(sys.lives);
+            player.hurt();
+            vfx.shake(7, 320);
+            sound.play('wrong_answer');
+            sound.play('player_damage');
+            particles.burst(pCXq, pCYq, 'explosion', 12);
+            floatingTextsRef.current.push(
+              new FloatingText(pCXq, pCYq - 60, '✗', 'wrong', 800),
+            );
+            if (sys.isGameOver()) {
+              sound.play('game_over');
+              setHighScore(sys.getHighScore());
+              tableProgressionRef.current?.saveCheckpoint();
+              syncPhase('gameover');
+              return;
+            }
+          }
+        }
       }
 
-      if (input.wasPressed('ArrowUp')) player.jump();
+      // ── Normal controls (blocked during quiz) ─────────────────────────────
+      if (!quizInProgress) {
+        if (input.isDown('ArrowRight')) {
+          player.velocity.x = player.MOVE_SPEED;
+          player.facingRight = true;
+          if (player.isOnGround && player.state !== 'attacking') player.state = 'running';
+        } else if (input.isDown('ArrowLeft')) {
+          player.velocity.x = -player.MOVE_SPEED * 0.6;
+          player.facingRight = false;
+          if (player.isOnGround && player.state !== 'attacking') player.state = 'running';
+        } else {
+          player.velocity.x = 0;
+          if (player.isOnGround && player.state === 'running') player.state = 'idle';
+        }
+        if (input.wasPressed('ArrowUp')) player.jump();
+      }
 
-      if (input.wasPressed('Space')) {
+      if (!quizInProgress && input.wasPressed('Space')) {
         player.attack();
 
         const pCX = player.position.x + player.size.width  / 2;
@@ -400,8 +487,8 @@ export function GameCanvas() {
       // UPDATE
       // ══════════════════════════════════════════════════════════════════════
 
-      const worldScroll = player.velocity.x > 0
-        ? WORLD_SCROLL * difficulty.getSpeedMultiplier()
+      const worldScroll = player.velocity.x !== 0
+        ? (player.velocity.x / player.MOVE_SPEED) * WORLD_SCROLL * difficulty.getSpeedMultiplier()
         : 0;
       forest.update(delta, worldScroll);
 
@@ -417,22 +504,29 @@ export function GameCanvas() {
       }
       setHammerEnergy(hammer.getEnergyFraction());
 
-      if (hammer.isCharged() && hammer.energy > hammer.maxEnergy - 5) {
-        const pCXr = player.position.x + player.size.width / 2;
+      // ── Quiz zone trigger ─────────────────────────────────────────────────
+      if (!quiz.isActive()) {
+        const pCXquiz = player.position.x + player.size.width / 2;
         for (const m of monstersRef.current) {
-          if (!m.isDead() && !m.isDying() &&
-              Math.abs(m.position.x + m.size.width / 2 - pCXr) < 260) {
-            m.recoilFromHammer();
+          if (m.isDead() || m.isDying() || !m.operation) continue;
+          if (quiz.hasTriggered(m.id)) continue;
+          const dist = m.position.x - pCXquiz;
+          if (dist > 0 && dist < quiz.QUIZ_ZONE) {
+            quiz.startQuiz(m.id, m.operation.a, m.operation.b, math, sys.level);
+            // Clear all in-flight projectiles for a clean quiz slate
+            projectilesRef.current = [];
+            break;
           }
         }
       }
+      quiz.update(delta);
 
       // ── Spawn ──
       gameTimeRef.current += delta / 1000;
       spawnTimerRef.current += delta;
       const spawnInterval = Math.max(1800, 7000 - gameTimeRef.current * 20);
 
-      if (spawnTimerRef.current >= spawnInterval) {
+      if (spawnTimerRef.current >= spawnInterval && !quiz.isActive()) {
         spawnTimerRef.current = 0;
 
         if (tableProg.isArtifactSubPhase()) {
@@ -472,13 +566,19 @@ export function GameCanvas() {
       }
 
       // ── Monsters ──
-      const pCXupd = player.position.x + player.size.width / 2;
+      const pCXupd      = player.position.x + player.size.width / 2;
+      const isQuizActive = quiz.isActive();
 
       monstersRef.current = monstersRef.current.filter((m) => {
-        m.update(delta, GROUND_Y);
-        if (m.isDead()) return false;
+        // Freeze all monsters while quiz is running (keep position, skip physics)
+        if (!isQuizActive) m.update(delta, GROUND_Y);
 
-        if (m.position.x <= -160) {
+        if (m.isDead()) {
+          quiz.onMonsterDead(m.id);
+          return false;
+        }
+
+        if (!isQuizActive && m.position.x <= -160) {
           if (m instanceof EagleMonster) {
             sys.loseLife();
             setLives(sys.lives);
@@ -496,48 +596,6 @@ export function GameCanvas() {
             }
           }
           return false;
-        }
-
-        // Step 1 – prepare queue when monster first enters attack range
-        if (m.operation && m.canAttack(pCXupd)) {
-          const { a, b } = m.operation;
-          const options = math.buildProjectileOptions(a * b, a, b, 4);
-          m.prepareQueue(options);
-          m.triggerAttack();
-        }
-
-        // Step 2 – fire one queued shot per interval, max 2 active at a time
-        if (m.operation && m.answerQueue.length > 0 && m.timeUntilNextShot <= 0) {
-          const equationId  = `${m.operation.a}x${m.operation.b}`;
-          const activeCount = projectilesRef.current.filter(
-            (p) => p.active && p.equationId === equationId,
-          ).length;
-
-          if (activeCount < m.maxActiveProjectiles) {
-            const { a, b } = m.operation;
-            const answer   = a * b;
-            const val      = m.dequeueShot();
-            if (val !== null) {
-              const lv     = sys.level;
-              const assist: VisualAssistLevel = lv <= 3 ? 'clear' : lv <= 7 ? 'subtle' : 'none';
-              const mCX    = m.position.x + m.size.width / 2;
-              const mCY    = m.position.y + m.size.height * 0.45;
-              // Aim toward player's reachable zone
-              const dist   = Math.max(80, mCX - pCXupd);
-              const vx     = -(185 + Math.random() * 45);
-              const tTime  = dist / Math.abs(vx);
-              const rawVy  = (GROUND_Y - 55 - mCY - 80 * tTime * tTime) / tTime;
-              const vy     = Math.max(-200, Math.min(-60, rawVy)) + (Math.random() - 0.5) * 28;
-              projectilesRef.current.push(
-                new AnswerProjectile(
-                  mCX + (Math.random() - 0.5) * 10,
-                  mCY,
-                  vx, vy,
-                  val, val === answer, equationId, assist,
-                ),
-              );
-            }
-          }
         }
 
         return true;
@@ -587,7 +645,7 @@ export function GameCanvas() {
       }
 
       // ── Passive monster collision ──
-      if (!player.isInvincible()) {
+      if (!quiz.isActive() && !player.isInvincible()) {
         for (const m of monstersRef.current) {
           if (!m.isDying() && rectsOverlap(player.getBounds(), m.getBounds())) {
             if (hammer.isCharged()) {
@@ -721,6 +779,12 @@ export function GameCanvas() {
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('[ ESPAÇO ] → Coletar!', px, py + 13);
+      }
+
+      // ── Quiz overlay (drawn on top of everything) ──────────────────────
+      if (quiz.isActive()) {
+        const activeQuiz = quiz.getQuiz();
+        if (activeQuiz) quizOverlay.draw(ctx, activeQuiz, player, GAME_W, GAME_H);
       }
 
       ctx.restore();

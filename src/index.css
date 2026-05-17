@@ -71,20 +71,38 @@ html, body, #root {
 
 .hud-lives {
   display: flex;
-  gap: 5px;
-  font-size: 20px;
-  line-height: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 110px;
 }
 
-.heart { filter: drop-shadow(0 0 5px #ff4444); }
-.heart.empty { filter: none; opacity: 0.35; }
+.hud-lives-icon {
+  font-size: 15px;
+  line-height: 1;
+  filter: drop-shadow(0 0 4px #ff4444);
+}
 
-.hud-center .hud-table {
-  font-size: 13px;
-  color: #44ffcc;
-  text-shadow: 0 0 8px rgba(68, 255, 200, 0.7), 1px 1px 0 #000;
-  letter-spacing: 1px;
-  font-weight: bold;
+.hud-lives-bar-bg {
+  flex: 1;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.hud-lives-bar-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.25s ease, background 0.25s ease;
+}
+
+.hud-lives-count {
+  font-size: 10px;
+  color: #fff;
+  min-width: 12px;
+  text-align: right;
+  text-shadow: 1px 1px 0 #000;
 }
 
 .hud-right {
@@ -102,16 +120,6 @@ html, body, #root {
   font-size: 9px;
   color: #ffd700;
   opacity: 0.8;
-}
-
-.hud-combo {
-  display: inline-block;
-  font-size: 14px;
-  color: #ffaa00;
-  text-shadow: 0 0 10px #ff6600, 1px 1px 0 #000;
-  font-weight: bold;
-  margin-left: 10px;
-  animation: pulseCombo 0.4s ease-out;
 }
 
 @keyframes pulseCombo {
@@ -374,7 +382,11 @@ html, body, #root {
   }
 
   .hud-lives {
-    font-size: 16px;
+    min-width: 90px;
+  }
+
+  .hud-lives-bar-bg {
+    height: 8px;
   }
 
   /* Question panel responsive */
