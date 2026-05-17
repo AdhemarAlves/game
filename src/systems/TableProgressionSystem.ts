@@ -147,6 +147,28 @@ export class TableProgressionSystem {
   hasCheckpoint(): boolean {
     return this.checkpoint !== null;
   }
+  // ─── Bird Lesson integration ─────────────────────────────────────────────
+
+  /**
+   * Called when the magic-bird lesson has finished teaching all 10 equations.
+   * Records them all as learned and advances to the monster sub-phase so that
+   * monsters start using those operations.
+   */
+  completeLessonPhase(): void {
+    if (this.randomMixPhase || this.subPhase !== 'artifacts') return;
+
+    // Record every remaining op for this table as learned
+    for (let b = this.currentItem; b <= 10; b++) {
+      const op: TableOp = { a: this.currentTable, b, result: this.currentTable * b };
+      this.currentTableOps.push(op);
+      this.allLearnedOps.push(op);
+    }
+
+    this.currentItem    = 11;
+    this.subPhase       = 'monsters';
+    this.monstersSpawned = 0;
+  }
+
   // ─── Reset ───────────────────────────────────────────────────────────────
 
   reset(): void {

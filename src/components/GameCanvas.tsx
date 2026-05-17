@@ -8,7 +8,10 @@ import { Monster } from '../entities/Monster';
 import { EagleMonster } from '../entities/EagleMonster';
 import { OgreMonster } from '../entities/OgreMonster';
 import { SnakeMonster } from '../entities/SnakeMonster';
-import { LearningArtifact } from '../entities/LearningArtifact';
+import { MagicBird } from '../entities/MagicBird';
+import { BirdLessonSystem } from '../systems/BirdLessonSystem';
+import { DialogueBubble } from '../ui/DialogueBubble';
+import { BirdKidnappedScene } from '../scenes/BirdKidnappedScene';
 import { AnswerProjectile } from '../entities/AnswerProjectile';
 import { MathSystem } from '../systems/MathSystem';
 import { ScoreSystem } from '../systems/ScoreSystem';
@@ -64,7 +67,10 @@ export function GameCanvas() {
   const forestRef            = useRef<ForestScene | null>(null);
   const playerRef            = useRef<Player | null>(null);
   const monstersRef          = useRef<Monster[]>([]);
-  const artifactsRef         = useRef<LearningArtifact[]>([]);
+  const birdRef              = useRef<MagicBird | null>(null);
+  const birdLessonRef        = useRef<BirdLessonSystem | null>(null);
+  const birdKidnapRef        = useRef<BirdKidnappedScene | null>(null);
+  const gameModeRef          = useRef<'playing' | 'bird_intro' | 'bird_lesson' | 'bird_kidnapped'>('playing');
   const projectilesRef       = useRef<AnswerProjectile[]>([]);
   const mathRef              = useRef<MathSystem | null>(null);
   const scoreRef             = useRef<ScoreSystem | null>(null);
@@ -116,10 +122,12 @@ export function GameCanvas() {
     player.state    = 'idle';
 
     monstersRef.current    = [];
-    artifactsRef.current   = [];
     projectilesRef.current = [];
     floatingTextsRef.current = [];
     particlesRef.current?.clear();
+    birdRef.current       = null;
+    birdLessonRef.current?.reset();
+    gameModeRef.current   = 'playing';
     spawnTimerRef.current = 0;
     gameTimeRef.current   = 0;
     quizRef.current?.reset();
@@ -172,8 +180,13 @@ export function GameCanvas() {
     const vfx        = new VisualEffects();
     const quiz        = new QuizModeSystem();
     const quizOverlay = new QuizOverlay();
+    const birdLesson    = new BirdLessonSystem();
+    const birdKidnap    = new BirdKidnappedScene();
+    const dialogueBubble = new DialogueBubble();
 
-    quizRef.current = quiz;
+    quizRef.current       = quiz;
+    birdLessonRef.current = birdLesson;
+    birdKidnapRef.current = birdKidnap;
 
     inputRef.current            = input;
     forestRef.current           = forest;
@@ -278,8 +291,8 @@ export function GameCanvas() {
         }
       }
 
-      // ── Normal controls (blocked during quiz) ─────────────────────────────
-      if (!quizInProgress) {
+      // ── Normal controls (blocked during quiz or bird mode) ─────────────────────────────
+      if (!quizInProgress && gameModeRef.current === 'playing') {
         if (input.isDown('ArrowRight')) {
           player.velocity.x = player.MOVE_SPEED;
           player.facingRight = true;
@@ -295,7 +308,7 @@ export function GameCanvas() {
         if (input.wasPressed('ArrowUp')) player.jump();
       }
 
-      if (!quizInProgress && input.wasPressed('Space')) {
+      if (!quizInProgress && input.wasPressed('Space') && gameModeRef.current === 'playing') {
         player.attack();
 
         const pCX = player.position.x + player.size.width  / 2;
@@ -414,69 +427,52 @@ export function GameCanvas() {
 
         } else {
           // ── No projectile cut ──
-          const nearArtifact = artifactsRef.current.find(
-            (a) => a.state === 'active' && rectsOverlap(player.getBounds(), a.getBounds()),
+          const nearMon = monstersRef.current.find(
+            (m) =>
+              !m.isDead() && !m.isDying() &&
+              Math.abs(m.position.x + m.size.width / 2 - pCX) < 120,
           );
+          if (nearMon) {
+            if (hammer.isCharged()) {
+              nearMon.hit();
+              hammer.consume();
+              setHammerState(hammer.state);
+              setHammerEnergy(hammer.getEnergyFraction());
 
-          if (nearArtifact) {
-            nearArtifact.collect();
-            memory.recordOperation(nearArtifact.a, nearArtifact.b, nearArtifact.result);
-            sound.play('gift_collect');
-            const ax = nearArtifact.position.x + nearArtifact.size.width / 2;
-            particles.burst(ax, nearArtifact.position.y, 'spark', 18);
-            floatingTextsRef.current.push(
-              new FloatingText(ax, nearArtifact.position.y - 50, `${nearArtifact.result}`, 'result', 2000),
-            );
-            coinSys.spawnCoins(ax, nearArtifact.position.y, 2);
-            sound.play('result_reveal');
-          } else {
-            const nearMon = monstersRef.current.find(
-              (m) =>
-                !m.isDead() && !m.isDying() &&
-                Math.abs(m.position.x + m.size.width / 2 - pCX) < 120,
-            );
-            if (nearMon) {
-              if (hammer.isCharged()) {
-                nearMon.hit();
-                hammer.consume();
-                setHammerState(hammer.state);
-                setHammerEnergy(hammer.getEnergyFraction());
+              const mCX = nearMon.position.x + nearMon.size.width / 2;
+              sound.play('monster_hit');
+              vfx.shake(5, 200);
+              particles.burst(mCX, nearMon.position.y, 'explosion', 14);
+              particles.burst(mCX, nearMon.position.y, 'star', 8);
 
-                const mCX = nearMon.position.x + nearMon.size.width / 2;
-                sound.play('monster_hit');
-                vfx.shake(5, 200);
-                particles.burst(mCX, nearMon.position.y, 'explosion', 14);
-                particles.burst(mCX, nearMon.position.y, 'star', 8);
-
-                if (nearMon.isDying()) {
-                  const pts = (nearMon.isBoss ? 150 : 50) * sys.level;
-                  sys.addScore(pts);
-                  setScore(sys.score);
-                  setLevel(sys.level);
-                  math.setMaxFactor(2 + sys.level);
-                  coinSys.spawnCoins(mCX, nearMon.position.y, nearMon.isBoss ? 6 : 3);
-                  sound.play('monster_defeated');
-                  floatingTextsRef.current.push(
-                    new FloatingText(mCX, nearMon.position.y - 40, `+${pts}`, 'score', 1400),
-                  );
-                  particles.burst(mCX, nearMon.position.y, 'explosion', 22);
-                }
-              } else {
-                player.hurt();
-                sys.loseLife();
-                setLives(sys.lives);
-                vfx.shake(5, 200);
-                sound.play('player_damage');
+              if (nearMon.isDying()) {
+                const pts = (nearMon.isBoss ? 150 : 50) * sys.level;
+                sys.addScore(pts);
+                setScore(sys.score);
+                setLevel(sys.level);
+                math.setMaxFactor(2 + sys.level);
+                coinSys.spawnCoins(mCX, nearMon.position.y, nearMon.isBoss ? 6 : 3);
+                sound.play('monster_defeated');
                 floatingTextsRef.current.push(
-                  new FloatingText(pCX, pCY - 60, 'Carregue o martelo!', 'message', 1800),
+                  new FloatingText(mCX, nearMon.position.y - 40, `+${pts}`, 'score', 1400),
                 );
-                if (sys.isGameOver()) {
-                  sound.play('game_over');
-                  setHighScore(sys.getHighScore());
-                  tableProgressionRef.current?.saveCheckpoint();
-                  syncPhase('gameover');
-                  return;
-                }
+                particles.burst(mCX, nearMon.position.y, 'explosion', 22);
+              }
+            } else {
+              player.hurt();
+              sys.loseLife();
+              setLives(sys.lives);
+              vfx.shake(5, 200);
+              sound.play('player_damage');
+              floatingTextsRef.current.push(
+                new FloatingText(pCX, pCY - 60, 'Carregue o martelo!', 'message', 1800),
+              );
+              if (sys.isGameOver()) {
+                sound.play('game_over');
+                setHighScore(sys.getHighScore());
+                tableProgressionRef.current?.saveCheckpoint();
+                syncPhase('gameover');
+                return;
               }
             }
           }
@@ -505,7 +501,7 @@ export function GameCanvas() {
       setHammerEnergy(hammer.getEnergyFraction());
 
       // ── Quiz zone trigger ─────────────────────────────────────────────────
-      if (!quiz.isActive()) {
+      if (!quiz.isActive() && gameModeRef.current === 'playing') {
         const pCXquiz = player.position.x + player.size.width / 2;
         for (const m of monstersRef.current) {
           if (m.isDead() || m.isDying() || !m.operation) continue;
@@ -521,57 +517,141 @@ export function GameCanvas() {
       }
       quiz.update(delta);
 
-      // ── Spawn ──
-      gameTimeRef.current += delta / 1000;
-      spawnTimerRef.current += delta;
-      const spawnInterval = Math.max(1800, 7000 - gameTimeRef.current * 20);
+      // ── Spawn (only during normal play) ───────────────────────────────────
+      if (gameModeRef.current === 'playing') {
+        gameTimeRef.current   += delta / 1000;
+        spawnTimerRef.current += delta;
+        const spawnInterval = Math.max(1800, 7000 - gameTimeRef.current * 20);
 
-      if (spawnTimerRef.current >= spawnInterval && !quiz.isActive()) {
-        spawnTimerRef.current = 0;
+        if (spawnTimerRef.current >= spawnInterval && !quiz.isActive()) {
+          spawnTimerRef.current = 0;
 
-        if (tableProg.isArtifactSubPhase()) {
-          const op = tableProg.nextArtifactOp();
-          artifactsRef.current.push(
-            new LearningArtifact(GAME_W + 50, GROUND_Y - 60, op.a, op.b, monsterIdRef.current++),
-          );
-          const tbl = tableProg.getCurrentTable();
-          setCurrentTable(tbl === 0 ? 10 : tbl);
-        } else {
-          const rnd = Math.random();
-          const op  = tableProg.randomMonsterOp();
-          const t   = gameTimeRef.current;
+          if (tableProg.isArtifactSubPhase()) {
+            // ── Bird lesson: clear the field and spawn the magic tutor ──
+            monstersRef.current    = [];
+            projectilesRef.current = [];
+            quiz.reset();
 
-          if (t > 90 && rnd < 0.15) {
-            const ogre = new OgreMonster(GAME_W + 80, GROUND_Y - 60, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' }, 2);
-            ogre.velocity.x = difficulty.getMonsterSpeed(-44);
-            monstersRef.current.push(ogre);
-          } else if (t > 60 && rnd < 0.30) {
-            const eagle = new EagleMonster(GAME_W + 80, GROUND_Y - 145, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' });
-            eagle.velocity.x = difficulty.getMonsterSpeed(-100);
-            monstersRef.current.push(eagle);
-          } else if (rnd < 0.60) {
-            const snake = new SnakeMonster(GAME_W + 80, GROUND_Y - 24, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' });
-            snake.velocity.x = difficulty.getMonsterSpeed(snake.velocity.x);
-            monstersRef.current.push(snake);
+            const table = tableProg.getCurrentTable();
+            const bird  = new MagicBird(GAME_W + 80, GROUND_Y - 240);
+            birdRef.current = bird;
+            bird.setTarget(player.position.x + 155, player.position.y - 95);
+            birdLesson.startLesson(table === 0 ? 10 : table);
+            gameModeRef.current = 'bird_intro';
+            sound.play('magic_bird_appear');
+            particles.burst(GAME_W / 2, GROUND_Y - 80, 'spark', 16);
+
           } else {
-            const m = new Monster(GAME_W + 80, GROUND_Y - 34, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' });
-            m.velocity.x = difficulty.getMonsterSpeed(m.velocity.x);
-            monstersRef.current.push(m);
-          }
+            const rnd = Math.random();
+            const op  = tableProg.randomMonsterOp();
+            const t   = gameTimeRef.current;
 
-          tableProg.onMonsterSpawned();
-          const tbl = tableProg.getCurrentTable();
-          setCurrentTable(tbl === 0 ? 10 : tbl);
+            if (t > 90 && rnd < 0.15) {
+              const ogre = new OgreMonster(GAME_W + 80, GROUND_Y - 60, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' }, 2);
+              ogre.velocity.x = difficulty.getMonsterSpeed(-44);
+              monstersRef.current.push(ogre);
+            } else if (t > 60 && rnd < 0.30) {
+              const eagle = new EagleMonster(GAME_W + 80, GROUND_Y - 145, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' });
+              eagle.velocity.x = difficulty.getMonsterSpeed(-100);
+              monstersRef.current.push(eagle);
+            } else if (rnd < 0.60) {
+              const snake = new SnakeMonster(GAME_W + 80, GROUND_Y - 24, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' });
+              snake.velocity.x = difficulty.getMonsterSpeed(snake.velocity.x);
+              monstersRef.current.push(snake);
+            } else {
+              const m = new Monster(GAME_W + 80, GROUND_Y - 34, monsterIdRef.current++, { a: op.a, b: op.b, op: 'x' });
+              m.velocity.x = difficulty.getMonsterSpeed(m.velocity.x);
+              monstersRef.current.push(m);
+            }
+
+            tableProg.onMonsterSpawned();
+            const tbl = tableProg.getCurrentTable();
+            setCurrentTable(tbl === 0 ? 10 : tbl);
+          }
+        }
+      }
+
+      // ── Bird mode updates ──────────────────────────────────────────────────
+      if (gameModeRef.current === 'bird_intro') {
+        const bird = birdRef.current;
+        if (bird) {
+          bird.facingLeft = bird.position.x > player.position.x;
+          bird.setTarget(player.position.x + 155, player.position.y - 95);
+          const reached = bird.update(delta);
+          if (reached) {
+            bird.state = 'teaching';
+            gameModeRef.current = 'bird_lesson';
+            sound.play('bird_teach');
+            particles.burst(bird.position.x + bird.size.width / 2, bird.position.y, 'energy', 18);
+          }
+        }
+      }
+
+      if (gameModeRef.current === 'bird_lesson') {
+        const bird = birdRef.current;
+        if (bird) {
+          bird.facingLeft = bird.position.x > player.position.x;
+          bird.update(delta);
+          const advanced = birdLesson.update(delta);
+          if (advanced && !birdLesson.isComplete()) {
+            sound.play('bird_teach');
+          }
+          if (birdLesson.isReadyForKidnap()) {
+            birdLesson.saveTaughtOps(memory);
+            tableProg.completeLessonPhase();
+            const tbl = tableProg.getCurrentTable();
+            setCurrentTable(tbl === 0 ? 10 : tbl);
+            // Bird stands still — captured state is set later when the boss actually grabs it
+            bird.state = 'idle';
+            gameModeRef.current = 'bird_kidnapped';
+            birdKidnap.start(GAME_W, GROUND_Y);
+            sound.play('lesson_complete');
+          }
+        }
+      }
+
+      if (gameModeRef.current === 'bird_kidnapped') {
+        const bird       = birdRef.current;
+        const prevStage  = birdKidnap.getStage();
+        birdKidnap.update(delta);
+        const newStage   = birdKidnap.getStage();
+
+        // Fire sounds on stage transitions
+        if (prevStage !== newStage) {
+          if (newStage === 'boss_enters') sound.play('boss_appear');
+          if (newStage === 'capture') {
+            sound.play('bird_kidnapped');
+            // Now the boss physically grabs the bird — switch to scared face
+            if (bird) bird.state = 'captured';
+          }
+          if (newStage === 'message')     sound.play('mission_start');
+        }
+
+        if (bird) {
+          const bossPos   = birdKidnap.getBossPosition();
+          bird.capturedByX = bossPos.x;
+          bird.capturedByY = bossPos.y;
+          bird.update(delta);
+        }
+
+        if (birdKidnap.isDone()) {
+          gameModeRef.current   = 'playing';
+          birdRef.current       = null;
+          spawnTimerRef.current = 0;
+          floatingTextsRef.current.push(
+            new FloatingText(GAME_W / 2, GAME_H * 0.35, '🐦 Recupere o pássaro!', 'message', 3500),
+          );
         }
       }
 
       // ── Monsters ──
-      const pCXupd      = player.position.x + player.size.width / 2;
-      const isQuizActive = quiz.isActive();
+      const pCXupd       = player.position.x + player.size.width / 2;
+      const isQuizActive  = quiz.isActive();
+      const isBirdMode    = gameModeRef.current !== 'playing';
 
       monstersRef.current = monstersRef.current.filter((m) => {
-        // Freeze all monsters while quiz is running (keep position, skip physics)
-        if (!isQuizActive) m.update(delta, GROUND_Y);
+        // Freeze all monsters while quiz or bird mode is running
+        if (!isQuizActive && !isBirdMode) m.update(delta, GROUND_Y);
 
         if (m.isDead()) {
           quiz.onMonsterDead(m.id);
@@ -617,10 +697,6 @@ export function GameCanvas() {
         }
       }
 
-      // ── Artifacts ──
-      artifactsRef.current = artifactsRef.current.filter((a) => a.isAlive());
-      artifactsRef.current.forEach((a) => a.update(delta));
-
       // ── Projectiles ──
       projectilesRef.current = projectilesRef.current.filter((p) => p.active);
       projectilesRef.current.forEach((p) => p.update(delta, GROUND_Y));
@@ -645,7 +721,7 @@ export function GameCanvas() {
       }
 
       // ── Passive monster collision ──
-      if (!quiz.isActive() && !player.isInvincible()) {
+      if (!quiz.isActive() && !player.isInvincible() && gameModeRef.current === 'playing') {
         for (const m of monstersRef.current) {
           if (!m.isDying() && rectsOverlap(player.getBounds(), m.getBounds())) {
             if (hammer.isCharged()) {
@@ -687,14 +763,21 @@ export function GameCanvas() {
         return ft.isAlive();
       });
 
-      // Nearest monster equation for HUD
-      const approaching = monstersRef.current
-        .filter((m) => !m.isDying() && !m.isDead() && m.operation)
-        .sort((a, b) => a.position.x - b.position.x)
-        .at(-1);
-      setCurrentEquation(
-        approaching?.operation ? `${approaching.operation.a} × ${approaching.operation.b}` : undefined,
-      );
+      // Nearest monster equation for HUD (or current lesson equation)
+      if (gameModeRef.current === 'bird_lesson' || gameModeRef.current === 'bird_intro') {
+        const eq = birdLesson.getCurrentEquation();
+        setCurrentEquation(eq ? `${eq.a} × ${eq.b} = ${eq.result}` : undefined);
+      } else {
+        const sortedMonsters = monstersRef.current
+          .filter((m) => !m.isDying() && !m.isDead() && m.operation)
+          .sort((a, b) => a.position.x - b.position.x);
+        const approaching = sortedMonsters.length > 0
+          ? sortedMonsters[sortedMonsters.length - 1]
+          : undefined;
+        setCurrentEquation(
+          approaching?.operation ? `${approaching.operation.a} × ${approaching.operation.b}` : undefined,
+        );
+      }
 
       // ══════════════════════════════════════════════════════════════════════
       // RENDER
@@ -706,11 +789,6 @@ export function GameCanvas() {
 
       forest.draw(ctx, GAME_W, GAME_H);
       coinSys.draw(ctx);
-
-      for (const a of artifactsRef.current) {
-        a.draw(ctx);
-        a.drawLabel(ctx);
-      }
 
       for (const p of projectilesRef.current) {
         p.draw(ctx);
@@ -763,25 +841,26 @@ export function GameCanvas() {
 
       particles.draw(ctx);
 
-      // Artifact collect prompt
-      const nearArt = artifactsRef.current.some(
-        (a) => a.state === 'active' && rectsOverlap(player.getBounds(), a.getBounds()),
-      );
-      if (nearArt) {
-        const px = GAME_W / 2;
-        const py = GROUND_Y - 38;
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.beginPath();
-        ctx.roundRect(px - 130, py, 260, 26, 6);
-        ctx.fill();
-        ctx.fillStyle    = '#ffe87c';
-        ctx.font         = 'bold 11px "Courier New", monospace';
-        ctx.textAlign    = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('[ ESPAÇO ] → Coletar!', px, py + 13);
+      // ── Kidnap scene overlay (darkness + boss + message) ─────────────────────
+      if (gameModeRef.current === 'bird_kidnapped') {
+        birdKidnap.draw(ctx, GAME_W, GAME_H);
       }
 
-      // ── Quiz overlay (drawn on top of everything) ──────────────────────
+      // ── Magic bird (drawn on top so it’s visible over darkness) ─────────────
+      const currentBird = birdRef.current;
+      if (currentBird) {
+        currentBird.draw(ctx);
+      }
+
+      // ── Dialogue bubble during lesson ───────────────────────────────────
+      if (
+        (gameModeRef.current === 'bird_intro' || gameModeRef.current === 'bird_lesson') &&
+        currentBird
+      ) {
+        dialogueBubble.draw(ctx, currentBird, birdLesson, GAME_W, GAME_H);
+      }
+
+      // ── Quiz overlay (drawn on top of everything) ────────────────────────
       if (quiz.isActive()) {
         const activeQuiz = quiz.getQuiz();
         if (activeQuiz) quizOverlay.draw(ctx, activeQuiz, player, GAME_W, GAME_H);

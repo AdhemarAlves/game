@@ -16,7 +16,14 @@ export type SoundEvent =
   | 'coin_collect'
   | 'player_damage'
   | 'combo'
-  | 'game_over';
+  | 'game_over'
+  // Magic-bird lesson events
+  | 'magic_bird_appear'
+  | 'bird_teach'
+  | 'lesson_complete'
+  | 'boss_appear'
+  | 'bird_kidnapped'
+  | 'mission_start';
 
 export class SoundManager {
   private ctx: AudioContext | null = null;
@@ -93,6 +100,13 @@ export class SoundManager {
         case 'game_over':          this.sweep(440, 80, 0.20, 'sawtooth', 1.20); break;
         case 'gift_collect':       this.tone(523, 0.11, 'triangle', 0.22, 0, 784, 0.22); break;
         case 'result_reveal':      this.tone(784, 0.11, 'sine', 0.28); break;
+        // Bird lesson
+        case 'magic_bird_appear':  this.arpeggio([659, 784, 1047, 1319], 0.12, 'sine', 0.09); break;
+        case 'bird_teach':         this.tone(1047, 0.07, 'sine', 0.22); break;
+        case 'lesson_complete':    this.arpeggio([523, 659, 784, 1047, 1319], 0.14, 'triangle', 0.09); break;
+        case 'boss_appear':        this.sweep(440, 80, 0.18, 'sawtooth', 0.85); break;
+        case 'bird_kidnapped':     this.tone(220, 0.20, 'sawtooth', 0.12, 0, 110, 0.28); break;
+        case 'mission_start':      this.arpeggio([440, 523, 659, 784], 0.14, 'triangle', 0.10); break;
       }
     } catch { /* ignore individual sound errors */ }
   }

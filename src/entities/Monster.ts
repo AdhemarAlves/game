@@ -218,7 +218,7 @@ export class Monster {
     ctx.restore();
 
     // HP bar for multi-hit monsters
-    if (this.maxHp > 1 && this.state !== 'dying' && this.state !== 'dead') {
+    if (this.maxHp > 1 && this.state !== 'dying' && !this.isDead()) {
       const bw = width + 8;
       const bx = x - 4;
       const by = y - 10;
