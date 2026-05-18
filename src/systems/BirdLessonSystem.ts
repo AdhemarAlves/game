@@ -8,7 +8,7 @@ export interface LessonEquation {
   step: number;
 }
 
-export type LessonPhase = 'idle' | 'intro' | 'teaching' | 'complete';
+export type LessonPhase = 'idle' | 'intro' | 'all_at_once' | 'teaching' | 'complete';
 
 /**
  * Controls the magic-bird lesson sequence:
@@ -21,11 +21,13 @@ export class BirdLessonSystem {
   private stepTimer      = 0;
   private introTimer     = 0;
   private completeTimer  = 0;
+  private allAtOnceTimer = 0;
   private phase: LessonPhase = 'idle';
 
   private readonly STEP_DURATION     = 2600;
   private readonly INTRO_DURATION    = 2200;
   private readonly COMPLETE_DURATION = 1800;
+  private readonly ALL_AT_ONCE_DURATION = 6000;
 
   private taughtOps: LessonEquation[] = [];
 
@@ -43,13 +45,28 @@ export class BirdLessonSystem {
 
   /**
    * Tick the lesson. Returns true whenever a step advances
-   * (intro → teaching, or one equation → next).
+   * (intro → all_at_once, or all_at_once → complete).
    */
   update(deltaMs: number): boolean {
     if (this.phase === 'intro') {
       this.introTimer -= deltaMs;
       if (this.introTimer <= 0) {
-        this.phase = 'teaching';
+        this.phase = 'all_at_once';
+        this.allAtOnceTimer = 0;
+        // Record all 10 ops immediately so they are available for monsters
+        this.taughtOps = [];
+        for (let b = 1; b <= 10; b++) {
+          this.taughtOps.push({ a: this.table, b, result: this.table * b, step: b });
+        }
+        return true;
+      }
+      return false;
+    }
+
+    if (this.phase === 'all_at_once') {
+      this.allAtOnceTimer += deltaMs;
+      if (this.allAtOnceTimer >= this.ALL_AT_ONCE_DURATION) {
+        this.phase = 'complete';
         return true;
       }
       return false;
@@ -84,7 +101,10 @@ export class BirdLessonSystem {
   getTable(): number      { return this.table; }
   getStep(): number       { return this.step; }  // 0–9
   isComplete(): boolean   { return this.phase === 'complete'; }
-
+  /** 0→1 progress of the all-at-once display phase. */
+  getAllAtOnceProgress(): number {
+    return Math.min(1, this.allAtOnceTimer / this.ALL_AT_ONCE_DURATION);
+  }
   /** True once the "complete" message has been shown long enough. */
   isReadyForKidnap(): boolean {
     return this.phase === 'complete' && this.completeTimer >= this.COMPLETE_DURATION;
@@ -122,6 +142,7 @@ export class BirdLessonSystem {
     this.stepTimer     = 0;
     this.introTimer    = 0;
     this.completeTimer = 0;
+    this.allAtOnceTimer = 0;
     this.taughtOps     = [];
   }
 }

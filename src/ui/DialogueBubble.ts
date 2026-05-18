@@ -19,6 +19,8 @@ export class DialogueBubble {
 
     if (phase === 'intro') {
       this.drawIntroOverlay(ctx, bx, by, lesson.getTable(), lesson.getIntroProgress(), gameW, gameH);
+    } else if (phase === 'all_at_once') {
+      this.drawFullTablePanel(ctx, lesson.getTable(), lesson.getAllAtOnceProgress(), gameW, gameH);
     } else if (phase === 'teaching') {
       const eq = lesson.getCurrentEquation();
       if (eq) this.drawEquationBubble(ctx, eq, lesson.getStep(), bx, by, gameW);
@@ -138,6 +140,104 @@ export class DialogueBubble {
     ctx.font      = '14px Arial';
     ctx.fillStyle = '#224433';
     ctx.fillText('Você aprendeu tudo! Agora...', bubX, bubY - 96 + 54);
+
+    ctx.restore();
+  }
+
+  // ── Full multiplication-table panel ──────────────────────────────────────
+
+  private drawFullTablePanel(
+    ctx: CanvasRenderingContext2D,
+    table: number,
+    progress: number,
+    gameW: number,
+    gameH: number,
+  ): void {
+    const alpha = Math.min(1, progress * 4); // fast fade-in
+    if (alpha < 0.01) return;
+
+    ctx.save();
+
+    // Dark backdrop
+    ctx.globalAlpha = Math.min(alpha, 0.78);
+    ctx.fillStyle = 'rgba(0,8,30,1)';
+    ctx.fillRect(0, 0, gameW, gameH);
+    ctx.globalAlpha = alpha;
+
+    // Panel dimensions
+    const pw = 520, ph = 300;
+    const px = (gameW - pw) / 2;
+    const py = (gameH - ph) / 2 - 10;
+    const r  = 18;
+
+    // Panel background
+    ctx.fillStyle = 'rgba(8,16,54,0.97)';
+    ctx.strokeStyle = 'rgba(80,195,255,0.88)';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = 'rgba(60,180,255,0.75)';
+    ctx.shadowBlur  = 30;
+    ctx.beginPath();
+    ctx.roundRect(px, py, pw, ph, r);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+
+    // Title
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font         = 'bold 22px Arial';
+    ctx.fillStyle    = '#ffe050';
+    ctx.shadowColor  = 'rgba(255,200,0,0.6)';
+    ctx.shadowBlur   = 12;
+    ctx.fillText(`✨  Tabuada do ${table}  ✨`, gameW / 2, py + 30);
+    ctx.shadowBlur = 0;
+
+    // Divider line
+    ctx.strokeStyle = 'rgba(80,195,255,0.35)';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(px + 24, py + 50);
+    ctx.lineTo(px + pw - 24, py + 50);
+    ctx.stroke();
+
+    // Equations: 2 columns × 5 rows
+    const col1X  = px + pw * 0.27;
+    const col2X  = px + pw * 0.73;
+    const rowH   = 38;
+    const startY = py + 72;
+
+    ctx.font = 'bold 19px Arial';
+    for (let b = 1; b <= 10; b++) {
+      const result = table * b;
+      const text   = `${table}  ×  ${b}  =  ${result}`;
+      const colX   = b <= 5 ? col1X : col2X;
+      const row    = b <= 5 ? b - 1 : b - 6;
+      const y      = startY + row * rowH;
+
+      // Alternating shade
+      ctx.fillStyle = row % 2 === 0
+        ? 'rgba(255,255,255,0.94)'
+        : 'rgba(160,220,255,0.82)';
+      ctx.fillText(text, colX, y);
+    }
+
+    // Progress bar
+    const barW = pw - 80;
+    const barX = px + 40;
+    const barY = py + ph - 22;
+
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath();
+    ctx.roundRect(barX, barY - 7, barW, 12, 6);
+    ctx.fill();
+
+    ctx.fillStyle    = '#44ddff';
+    ctx.shadowColor  = 'rgba(100,220,255,0.8)';
+    ctx.shadowBlur   = 8;
+    ctx.beginPath();
+    ctx.roundRect(barX, barY - 7, Math.max(12, barW * progress), 12, 6);
+    ctx.fill();
+    ctx.shadowBlur = 0;
 
     ctx.restore();
   }

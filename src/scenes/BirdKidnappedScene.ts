@@ -55,9 +55,9 @@ export class BirdKidnappedScene {
   private readonly ENTERING_DUR    = 1100;
   private readonly APPROACHING_DUR = 1300;
   private readonly GRABBING_DUR    = 680;
-  private readonly HOLDING_DUR     = 380;
-  private readonly ESCAPING_DUR    = 900;
-  private readonly MESSAGE_DUR     = 2700;
+  private readonly HOLDING_DUR     = 160;   // grab-and-run — very brief
+  private readonly ESCAPING_DUR    = 420;   // flees fast
+  private readonly MESSAGE_DUR     = 1600;
 
   /**
    * @param gameW   canvas width
@@ -134,7 +134,7 @@ export class BirdKidnappedScene {
         if (this.stageTimer <= 0) {
           this.stage      = 'escaping';
           this.stageTimer = this.ESCAPING_DUR;
-          this.bossSpeed  = 420;
+          this.bossSpeed  = 680;   // frightened sprint
           this.armExtend  = 0.65;
         }
         break;
@@ -142,6 +142,7 @@ export class BirdKidnappedScene {
       case 'escaping':
         this.stageTimer -= deltaMs;
         this.bossX      += this.bossSpeed * dt;
+        this.bossSpeed  += 220 * dt;   // accelerates as it panics
         this.tremor = Math.sin(this.msgElapsed * 0.012) * 0.4; // Tremor while fleeing
         if (this.stageTimer <= 0) {
           this.stage      = 'message';
@@ -200,7 +201,8 @@ export class BirdKidnappedScene {
       this.stage === 'holding'     ||
       this.stage === 'escaping'
     ) {
-      this.drawBoss(ctx, this.bossX, this.bossY, this.armExtend);
+      const scared = this.stage === 'escaping';
+      this.drawBoss(ctx, this.bossX, this.bossY, this.armExtend, scared);
     }
 
     // Mission message panel
@@ -216,10 +218,14 @@ export class BirdKidnappedScene {
     x: number,
     y: number,
     armExtend: number,
+    scared = false,
   ): void {
     const w  = 92, h = 92;
-    const cx = x + w / 2;
-    const cy = y + h / 2;
+    // Frightened shake during escape
+    const shakeX = scared ? Math.sin(Date.now() / 38) * 5 : 0;
+    const shakeY = scared ? Math.cos(Date.now() / 28) * 3 : 0;
+    const cx = x + w / 2 + shakeX;
+    const cy = y + h / 2 + shakeY;
 
     ctx.save();
 
@@ -309,41 +315,67 @@ export class BirdKidnappedScene {
     ctx.arc(rShoulderX + 14, rShoulderY + 22, 8, 0, Math.PI * 2);
     ctx.fill();
 
-    // ── Eyes (glowing, angry) ──
-    ctx.shadowColor = 'rgba(255,80,0,0.9)';
+    // ── Eyes (scared wide when fleeing, angry otherwise) ──
+    ctx.shadowColor = scared ? 'rgba(255,200,0,0.9)' : 'rgba(255,80,0,0.9)';
     ctx.shadowBlur  = 12;
-    ctx.fillStyle   = '#ff2200';
-    ctx.beginPath(); ctx.arc(cx - 18, cy - 4, 10, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + 18, cy - 4, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle   = scared ? '#ffcc00' : '#ff2200';
+    const eyeR      = scared ? 13 : 10;   // wider when scared
+    ctx.beginPath(); ctx.arc(cx - 18, cy - 4, eyeR, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 18, cy - 4, eyeR, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur  = 0;
 
+    // Pupils — contracted (fear) when fleeing
     ctx.fillStyle = '#1a0000';
-    ctx.beginPath(); ctx.arc(cx - 16, cy - 4, 6, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + 20, cy - 4, 6, 0, Math.PI * 2); ctx.fill();
+    const pupilR  = scared ? 3 : 6;
+    ctx.beginPath(); ctx.arc(cx - 16, cy - 6, pupilR, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 20, cy - 6, pupilR, 0, Math.PI * 2); ctx.fill();
 
-    // Angry V-brows
+    // Brows — raised in fear when escaping, angry V otherwise
     ctx.strokeStyle = '#440000';
     ctx.lineWidth   = 5;
     ctx.lineCap     = 'round';
-    ctx.beginPath(); ctx.moveTo(cx - 30, cy - 22); ctx.lineTo(cx - 6, cy - 11); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx + 30, cy - 22); ctx.lineTo(cx + 6, cy - 11); ctx.stroke();
+    if (scared) {
+      // Raised worried brows
+      ctx.beginPath(); ctx.moveTo(cx - 30, cy - 28); ctx.lineTo(cx - 6, cy - 22); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + 30, cy - 28); ctx.lineTo(cx + 6, cy - 22); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.moveTo(cx - 30, cy - 22); ctx.lineTo(cx - 6, cy - 11); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + 30, cy - 22); ctx.lineTo(cx + 6, cy - 11); ctx.stroke();
+    }
 
-    // ── Mouth (menacing grin with teeth) ──
-    ctx.beginPath();
-    ctx.arc(cx, cy + 22, 18, 0.15, Math.PI - 0.15);
-    ctx.fillStyle = '#550000';
-    ctx.fill();
-    ctx.strokeStyle = '#770000';
-    ctx.lineWidth   = 2;
-    ctx.stroke();
-
-    ctx.fillStyle = '#f0eedc';
-    for (let i = -2; i <= 2; i++) {
+    // ── Mouth: open in panic when fleeing, menacing grin otherwise ──
+    if (scared) {
       ctx.beginPath();
-      ctx.moveTo(cx + i * 7 - 2,  cy + 22);
-      ctx.lineTo(cx + i * 7 + 1,  cy + 32);
-      ctx.lineTo(cx + i * 7 + 5,  cy + 22);
-      ctx.closePath();
+      ctx.arc(cx, cy + 20, 14, 0, Math.PI);
+      ctx.fillStyle = '#550000';
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.arc(cx, cy + 22, 18, 0.15, Math.PI - 0.15);
+      ctx.fillStyle = '#550000';
+      ctx.fill();
+      ctx.strokeStyle = '#770000';
+      ctx.lineWidth   = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#f0eedc';
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(cx + i * 7 - 2,  cy + 22);
+        ctx.lineTo(cx + i * 7 + 1,  cy + 32);
+        ctx.lineTo(cx + i * 7 + 5,  cy + 22);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // Sweat drop when scared
+    if (scared) {
+      ctx.fillStyle = 'rgba(100,200,255,0.85)';
+      ctx.beginPath();
+      ctx.ellipse(cx + 36, cy - 18, 5, 8, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cx + 34, cy - 4, 3.5, 5.5, 0.2, 0, Math.PI * 2);
       ctx.fill();
     }
 

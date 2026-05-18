@@ -59,8 +59,19 @@ export class BossMonster extends Monster {
     return this.operations[this.operationIndex % this.operations.length];
   }
 
+  /** Public: rotate to a new random operation so the next quiz shows a different equation. */
+  advanceOperation(): void {
+    this.cycleOperation();
+  }
+
   private cycleOperation(): void {
-    this.operationIndex = (this.operationIndex + 1) % this.operations.length;
+    if (this.operations.length > 1) {
+      let newIdx: number;
+      do {
+        newIdx = Math.floor(Math.random() * this.operations.length);
+      } while (newIdx === this.operationIndex);
+      this.operationIndex = newIdx;
+    }
     const op = this.operations[this.operationIndex];
     this.operation = { a: op.a, b: op.b, op: 'x' };
   }

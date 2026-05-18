@@ -50,6 +50,7 @@ const GAME_H = 540;
 const GROUND_Y = GAME_H * 0.74;
 const WORLD_SCROLL = 90;   // px/s background scrolls when player moves right
 const ATTACK_REACH = 105;  // px – forward reach of player attack hitbox
+const MAX_PLAYER_SCREEN_X = Math.round(GAME_W * 0.55); // camera: player stays left of centre
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export function GameCanvas() {
@@ -433,7 +434,10 @@ export function GameCanvas() {
             if (gameModeRef.current === 'stage_boss_battle') {
               bossBattle.onQuestionAnswered(true);
               const boss = monstersRef.current.find(m => m instanceof BossMonster);
-              if (boss && !boss.isDead()) quiz.clearTrigger(boss.id);
+              if (boss && !boss.isDead()) {
+                (boss as BossMonster).advanceOperation();
+                quiz.clearTrigger(boss.id);
+              }
             }
 
             for (const p of projectilesRef.current) {
@@ -471,7 +475,10 @@ export function GameCanvas() {
             if (gameModeRef.current === 'stage_boss_battle') {
               bossBattle.onQuestionAnswered(false);
               const boss = monstersRef.current.find(m => m instanceof BossMonster);
-              if (boss && !boss.isDead()) quiz.clearTrigger(boss.id);
+              if (boss && !boss.isDead()) {
+                (boss as BossMonster).advanceOperation();
+                quiz.clearTrigger(boss.id);
+              }
             }
 
             const correctProj = projectilesRef.current.find(
@@ -621,8 +628,8 @@ export function GameCanvas() {
       hammer.update(delta);
       player.update(delta, GROUND_Y);
       health.update(delta);
-      // Keep player within canvas bounds
-      player.position.x = Math.max(0, Math.min(player.position.x, GAME_W - player.size.width));
+      // Keep player within canvas bounds — never past 55% of screen width
+      player.position.x = Math.max(0, Math.min(player.position.x, MAX_PLAYER_SCREEN_X));
 
       if (hammer.state !== prevHammerStateRef.current) {
         prevHammerStateRef.current = hammer.state;
@@ -651,7 +658,10 @@ export function GameCanvas() {
       // In boss battle: re-enable boss to ask again after the quiz closes
       if (quizExited === 'exited' && gameModeRef.current === 'stage_boss_battle') {
         const boss = monstersRef.current.find(m => m instanceof BossMonster);
-        if (boss && !boss.isDead()) quiz.clearTrigger(boss.id);
+        if (boss && !boss.isDead()) {
+          (boss as BossMonster).advanceOperation();
+          quiz.clearTrigger(boss.id);
+        }
       }
 
       // ── Spawn (only during normal play) ───────────────────────────────────
@@ -687,11 +697,9 @@ export function GameCanvas() {
 
             const bossLevel = bossEvo.getLevel();
             const table     = tableProg.getCurrentTable() || 5;
-            const tableOps  = tableProg.getTableOps();
-            const opSlice   =
-              tableOps.length > 0
-                ? tableOps.slice(0, bossEvo.getOpCount()).map(o => ({ a: o.a, b: o.b }))
-                : [{ a: table, b: 5 }];
+            // Use all 10 ops of the current table so the boss varies questions
+            const opSlice: Array<{ a: number; b: number }> = [];
+            for (let b = 1; b <= 10; b++) opSlice.push({ a: table, b });
 
             // HP scales with boss level: 200 at level 0, +100 per level
             const bossHp  = 200 + bossLevel * 100;
@@ -876,6 +884,8 @@ export function GameCanvas() {
 
       // ── Bird rescue scene ──────────────────────────────────────────────────
       if (gameModeRef.current === 'bird_rescue') {
+        // Keep animating the cage break even after the boss is gone
+        birdCageRef.current?.update(delta);
         birdRescue.update(delta);
         const bird = birdRef.current;
         if (bird) {
@@ -1000,10 +1010,16 @@ export function GameCanvas() {
               vfx.shake(8, 600);
               particles.burst(m.position.x + m.size.width / 2, m.position.y, 'explosion', 30);
               particles.burst(m.position.x + m.size.width / 2, m.position.y, 'star', 16);
+              particles.burst(GAME_W / 2, GROUND_Y - 120, 'energy', 28);
+              particles.burst(GAME_W / 2, GROUND_Y - 120, 'spark', 18);
               floatingTextsRef.current.push(
                 new FloatingText(
                   m.position.x + m.size.width / 2, m.position.y - 50,
                   '⚔️  BOSS DERROTADO!', 'message', 2200,
+                ),
+                new FloatingText(
+                  GAME_W / 2, GAME_H * 0.22,
+                  '🐦 Você salvou o pássaro mágico!', 'message', 3500,
                 ),
               );
             }
